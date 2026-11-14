@@ -39,14 +39,14 @@ Windows 用 WSL2 Ubuntu 22.04，香橙派 5 Plus 用 Ubuntu Jammy ARM64。两端
 
 ```bash
 # 已安装 ROS 2 Humble 后，一次性准备依赖
-sudo apt install python3-colcon-common-extensions libopencv-dev python3-opencv python3-venv
+sudo apt install ros-humble-ros-base ros-humble-rosidl-default-generators ros-humble-ament-cmake-python python3-colcon-common-extensions libopencv-dev python3-opencv python3-venv
 git clone https://github.com/Kristinblue/gongchaung_ros2.git gongchuang_ros2
 cd gongchuang_ros2
 bash build.sh
 bash run.sh
 ```
 
-Windows 打开 [本地预览](http://localhost:8080)，点「使用电脑摄像头」。默认 640×360、10 fps，支持调整 JPEG 质量。也可用手机 IP Webcam：`bash run.sh source:=http camera_url:=http://手机IP:8080/video`，手机与运行 ROS 的电脑需互通。
+Windows 打开 [本地预览](http://localhost:18080)，点「使用电脑摄像头」。默认 640×360、10 fps，支持调整 JPEG 质量。如需电脑 YOLO，在 WSL 执行 `python3 -m venv --system-site-packages .venv` 和 `.venv/bin/pip install "numpy<2" onnxruntime` 后加 `model:=/绝对路径/best.onnx`。也可用手机 IP Webcam：`bash run.sh source:=http camera_url:=http://手机IP:8080/video`，手机与运行 ROS 的电脑需互通。
 
 ### 香橙派
 
@@ -58,4 +58,4 @@ bash setup_pi.sh ~/rknn-toolkit2/rknn-toolkit-lite2/packages/*cp310*.whl \
 bash run.sh source:=usb camera_device:=/dev/video0 model:="$PWD/models/train5.rknn"
 ```
 
-按 `v4l2-ctl --list-devices` 选择实际 USB 摄像头。电脑用 `ssh -N -L 8080:127.0.0.1:8080 pio-relay` 转发（有线换 `pio`），再打开本地预览。实车联调另加 `uart:=/dev/ttyS6`，由 `ros2 service call /task/start std_srvs/srv/Trigger '{}'` 开始、`/task/stop` 停止。正式 Qt 客户端后续接同一套 HTTP 接口。
+按 `v4l2-ctl --list-devices` 选择实际 USB 摄像头。电脑用 `ssh -N -L 18080:127.0.0.1:18080 pio-relay` 转发（有线换 `pio`），再打开本地预览。实车联调另加 `uart:=/dev/ttyS6`，由 `ros2 service call /task/start std_srvs/srv/Trigger '{}'` 开始、`/task/stop` 停止。正式 Qt 客户端后续接同一套 HTTP 接口。

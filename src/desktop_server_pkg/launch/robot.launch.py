@@ -42,7 +42,7 @@ def generate_launch_description():
         DeclareLaunchArgument('source', default_value='browser'),
         DeclareLaunchArgument('camera_url', default_value=''),
         DeclareLaunchArgument('camera_device', default_value='/dev/video0'),
-        DeclareLaunchArgument('port', default_value='8080'),
+        DeclareLaunchArgument('port', default_value='18080'),
         DeclareLaunchArgument('model', default_value=''),
         DeclareLaunchArgument('uart', default_value=''),
         OpaqueFunction(function=nodes),

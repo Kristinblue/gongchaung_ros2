@@ -31,7 +31,8 @@ class YoloNode(Node):
         self.create_subscription(Image, 'camera/image', self.detect, qos)
 
     def detect(self, message):
-        if message.encoding != 'bgr8' or message.step < message.width * 3:
+        if (message.encoding != 'bgr8' or not message.width or not message.height or
+                message.step < message.width * 3 or len(message.data) != message.height * message.step):
             return
         frame = np.frombuffer(message.data, dtype=np.uint8).reshape(message.height, message.step)
         frame = frame[:, :message.width * 3].reshape(message.height, message.width, 3)

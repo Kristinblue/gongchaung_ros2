@@ -20,15 +20,15 @@ class DesktopServer : public rclcpp::Node {
 public:
   DesktopServer() : Node("desktop_server_node") {
     const auto host = declare_parameter("host", "127.0.0.1");
-    const auto port = declare_parameter("port", 8080);
+    const int port = declare_parameter("port", 8080);
     const auto source = declare_parameter("camera_source", "usb");
     browser_ = source == "browser";
     if (!browser_ && source != "usb" && source != "http") throw std::invalid_argument("camera_source");
     const auto width = declare_parameter("preview_width", 640);
     const auto height = declare_parameter("preview_height", 360);
     quality_ = declare_parameter("jpeg_quality", 65);
-    if (width < 1 || height < 1 || quality_ < 25 || quality_ > 90)
-      throw std::invalid_argument("preview dimensions or JPEG quality");
+    if (port < 1 || port > 65535 || width < 1 || height < 1 || quality_ < 25 || quality_ > 90)
+      throw std::invalid_argument("HTTP port, preview dimensions or JPEG quality");
     status_ = create_subscription<std_msgs::msg::String>("task/state", rclcpp::QoS(1).transient_local(),
       [this](const std_msgs::msg::String &message) {
         std::lock_guard lock(mutex_);

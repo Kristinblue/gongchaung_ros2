@@ -65,7 +65,7 @@ public:
     config.c_cflag |= CLOCAL | CREAD;
     cfsetispeed(&config, B115200);
     cfsetospeed(&config, B115200);
-    if (tcsetattr(fd_, TCSANOW, &config) != 0 || !send(1, 0)) {
+    if (tcsetattr(fd_, TCSANOW, &config) != 0 || !send(6, 0) || !send(1, 0)) {
       disconnect();
       throw std::runtime_error("[Serial] 无法初始化串口 " + device);
     }

@@ -114,7 +114,7 @@ private:
   bool active_{false}, connected_{false}, turn_done_{false};
   int move_ms_, scatter_ms_, move_, scatter_, turn_;
   Clock::time_point started_{}, last_frame_{};
-  rclcpp::Time last_stamp_{0,0,RCL_SYSTEM_TIME};
+  rclcpp::Time last_stamp_{0,0,RCL_ROS_TIME};
   rclcpp::Publisher<Command>::SharedPtr commands_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_;
   rclcpp::Subscription<communication_pkg::msg::State>::SharedPtr state_;

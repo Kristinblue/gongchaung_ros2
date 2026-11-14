@@ -1,6 +1,6 @@
-build/
-install/
-log/
+/build/
+/install/
+/tools/log/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -22,4 +22,4 @@ models/
 *.pem
 *.key
 *.local.yaml
-experiments/output/
+/tools/experiments/output/

@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from vision_pkg.msg import Object, Objects
@@ -17,6 +18,7 @@ class YoloNode(Node):
         path = self.declare_parameter('model', '').value
         self.declare_parameter('confidence', .6)
         self.declare_parameter('iou', .45)
+        self.add_on_set_parameters_callback(self.validate_settings)
         if path.lower().endswith('.rknn'):
             self.detector = YOLOv8(path)
             self.labels = ['orange', 'blue', 'green', 'black', 'bsafe', 'rsafe']
@@ -29,6 +31,16 @@ class YoloNode(Node):
         self.objects = self.create_publisher(Objects, 'vision/detections', qos)
         self.frames = self.create_publisher(Image, 'vision/inference_image', qos)
         self.create_subscription(Image, 'camera/image', self.detect, qos)
+
+    @staticmethod
+    def validate_settings(parameters):
+        for parameter in parameters:
+            if parameter.name in ('confidence', 'iou'):
+                if not isinstance(parameter.value, float) or not 0 <= parameter.value <= 1:
+                    return SetParametersResult(successful=False, reason='阈值需要在 0～1 之间')
+            if parameter.name == 'model':
+                return SetParametersResult(successful=False, reason='换模型需要重启')
+        return SetParametersResult(successful=True)
 
     def detect(self, message):
         if (message.encoding != 'bgr8' or not message.width or not message.height or

@@ -28,6 +28,21 @@ public:
     p.first = declare_parameter("first", true);
     p.confirm = declare_parameter("confirm_frames", 3);
     p.tolerance = declare_parameter("align_px", 20);
+    p.settle = declare_parameter("camera_settle_ms", 400);
+    p.threshold = declare_parameter("search_score_min", 10);
+    p.forward = declare_parameter("lost_move", 200);
+    p.forward_ms = declare_parameter("lost_move_ms", 1000);
+    p.gate = declare_parameter("track_gate_px", 150);
+    p.turn_only = declare_parameter("turn_only_px", 80);
+    p.turn_limit = declare_parameter("turn_limit_px", 100);
+    p.forward_limit = declare_parameter("move_limit_px", 180);
+    p.green = declare_parameter("score.green", 5.);
+    p.black = declare_parameter("score.black", 5.);
+    p.orange = declare_parameter("score.orange", 2.);
+    p.count = declare_parameter("score.count_reward", 4.);
+    p.safe = declare_parameter("score.our_safe", 6.);
+    p.distance = declare_parameter("score.distance_reward", .002);
+    target_ = create_publisher<GoTo::Objects>("task/target", rclcpp::SensorDataQoS().keep_last(1));
     commands_ = create_publisher<Command>("robot/command", 10);
     status_ = create_publisher<std_msgs::msg::String>("task/state", rclcpp::QoS(1).transient_local());
     state_ = create_subscription<communication_pkg::msg::State>("robot/state", rclcpp::QoS(1).transient_local(),
@@ -83,6 +98,14 @@ private:
       stop();
     } else {
       publish(go_to_.stage);
+      if (const auto target = go_to_.target()) {
+        GoTo::Objects selected;
+        selected.header = frame.header;
+        selected.width = frame.width;
+        selected.height = frame.height;
+        selected.items.push_back(*target);
+        target_->publish(selected);
+      }
     }
   }
 
@@ -116,6 +139,7 @@ private:
   Clock::time_point started_{}, last_frame_{};
   rclcpp::Time last_stamp_{0,0,RCL_ROS_TIME};
   rclcpp::Publisher<Command>::SharedPtr commands_;
+  rclcpp::Publisher<GoTo::Objects>::SharedPtr target_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_;
   rclcpp::Subscription<communication_pkg::msg::State>::SharedPtr state_;
   rclcpp::Subscription<communication_pkg::msg::Feedback>::SharedPtr feedback_;

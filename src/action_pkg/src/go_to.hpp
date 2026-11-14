@@ -27,9 +27,15 @@ public:
   Config config;
   std::string stage{"search"};
 
+  std::optional<Object> target() const {
+    if (stage == "track" && hits_ >= config.confirm) return target_;
+    return std::nullopt;
+  }
+
   void reset() {
     stage = "search";
     step_ = -1;
+    camera_ = -1;
     target_.reset();
     hits_ = aligned_ = 0;
   }

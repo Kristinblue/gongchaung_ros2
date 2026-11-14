@@ -1,6 +1,6 @@
 /build/
 /install/
-/tools/log/
+/tools/logs/colcon/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -23,3 +23,8 @@ models/
 *.key
 *.local.yaml
 /tools/experiments/output/
+/tools/laptop_server/dist/
+/tools/laptop_server/build/
+/tools/laptop_server/GongchuangClient.zip
+/tools/logs/ros/
+/.obsidian/

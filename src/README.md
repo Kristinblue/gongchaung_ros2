@@ -21,6 +21,8 @@ bash tools/build.sh
 
 `bash tools/run.sh` 后打开 [预览](http://localhost:18080)，点击「使用电脑摄像头」。手机 IP Webcam 用 `bash tools/run.sh source:=http camera_url:=http://手机IP:8080/video`。
 
+也可以用 [Windows Qt 客户端](../tools/laptop_server/README.md)连接。
+
 在 WSL 跑 YOLO 时，先执行 `python3 -m venv --system-site-packages tools/.venv` 和 `tools/.venv/bin/python -m pip install "numpy<2" onnxruntime`，然后给启动命令加 `model:=/绝对路径/best.onnx`。
 
 ## 香橙派

@@ -17,6 +17,7 @@ button,input{font:inherit;padding:6px 10px}input{width:4em}
 <section>
 <button id="camera" hidden>使用电脑摄像头</button>
 <label>JPEG 质量 <input id="quality" type="number" min="25" max="90" value="65"></label>
+<label id="threshold" hidden>YOLO 置信度 <input id="confidence" type="number" min="0" max="1" step="0.01"></label>
 <button id="apply">应用</button>
 <span id="message" role="status"></span>
 </section>
@@ -25,6 +26,8 @@ button,input{font:inherit;padding:6px 10px}input{width:4em}
 const preview = document.querySelector('#preview');
 const camera = document.querySelector('#camera');
 const quality = document.querySelector('#quality');
+const threshold = document.querySelector('#threshold');
+const confidence = document.querySelector('#confidence');
 const message = document.querySelector('#message');
 const status = document.querySelector('#status');
 const headers = {'X-Gongchuang-Client': 'web'};
@@ -46,6 +49,9 @@ async function refresh() {
     const data = await reply.json();
     camera.hidden = data.camera_source !== 'browser';
     if (!settingLoaded) { quality.value = data.jpeg_quality; settingLoaded = true; }
+    const hasDetector = typeof data.confidence === 'number';
+    if (hasDetector && threshold.hidden) confidence.value = data.confidence;
+    threshold.hidden = !hasDetector;
     status.textContent = '阶段：' + data.task.stage;
   } catch { status.textContent = '服务已断开'; }
 }
@@ -91,12 +97,16 @@ camera.onclick = async () => {
   } finally { camera.disabled = false; }
 };
 document.querySelector('#apply').onclick = async () => {
-  if (!quality.reportValidity()) return;
+  if (!quality.reportValidity() || (!threshold.hidden && !confidence.reportValidity())) return;
+  const fields = new URLSearchParams({jpeg_quality:quality.value});
+  if (!threshold.hidden && confidence.value !== '') fields.set('confidence', confidence.value);
   try {
-    const response = await fetch('/settings', {method:'POST', headers, body:new URLSearchParams({jpeg_quality:quality.value})});
+    const response = await fetch('/settings', {method:'POST', headers, body:fields});
     if (!response.ok) throw Error();
     const data = await response.json();
-    message.textContent = '已应用 JPEG 质量 ' + data.jpeg_quality;
+    quality.value = data.jpeg_quality;
+    if (typeof data.confidence === 'number') confidence.value = data.confidence;
+    message.textContent = '设置已应用';
   } catch { message.textContent = '设置失败'; }
 };
 window.addEventListener('pagehide', stopCamera);

@@ -1,0 +1,14 @@
+task_node:
+  ros__parameters:
+    move_ms: 5000
+    scatter_ms: 7000
+    base_forward: -100
+    scatter_forward: -125
+    base_turn: 281
+    x0: 640.0
+    y0: 550.0
+    search_camera_1: 30
+    search_camera_2: 20
+    first: true
+    confirm_frames: 3
+    align_px: 20

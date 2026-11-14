@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>desktop_server_pkg</name>
+  <version>0.1.0</version>
+  <description>Gongchuang robot desktop_server.</description>
+  <maintainer email="Kristinblue@users.noreply.github.com">Kristin</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>ament_index_cpp</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>libopencv-dev</depend>
+  <exec_depend>ros2launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>vision_pkg</exec_depend>
+  <exec_depend>communication_pkg</exec_depend>
+  <exec_depend>action_pkg</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

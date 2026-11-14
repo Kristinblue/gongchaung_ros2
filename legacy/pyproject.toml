@@ -1,0 +1,63 @@
+
+
+# build-system 表示“构建系统”。pip 读取本文件后，会根据这里的配置选择安装工具。
+# 这部分通常不需要修改，它并不是 Orange Pi 的交叉编译配置。
+[build-system]
+# setuptools 是额外安装的 Python 打包工具。
+# 61.0 及以上版本支持下面使用的标准 project 配置格式。
+requires = ["setuptools>=61.0"]
+# build-backend 表示“构建后端”，即 pip 实际调用的 setuptools 接口。
+build-backend = "setuptools.build_meta"
+
+
+# project 保存项目自身的基本信息。
+# 这里的 name 是 pip 看到的“发行项目名”，不等于代码中的 import 名称。
+[project]
+name = "gongchuang-vision"
+version = "0.2.0"
+description = "工创赛视觉工具：OpenCV/NumPy 图像、摄像头采集线程、瑞芯微 YOLOv8 前后处理和 PyQt5 界面"
+authors = [
+    { name = "Kristin" },
+]
+# 当前项目目标环境为 Python 3.10，因此不允许更低版本安装。
+requires-python = ">=3.10"
+
+# 这里暂时不声明 dependencies（运行依赖）。
+# 本项目需要 NumPy、OpenCV 和 PyQt5，但 Orange Pi 上的 OpenCV、PyQt5 可能由
+# apt（Advanced Package Tool，Ubuntu 系统包管理器）或硬件厂商环境提供。
+# 如果在此处直接声明，pip 可能下载另一套版本，造成 ARM 或硬件加速兼容问题。
+
+
+# package-dir 用于指定“Python 包搜索根目录”。
+# 空字符串 "" 表示所有顶层包；右边表示它们统一位于 src/lib 下。
+# 这里包含 calculator、communication、utils 等包，不需要脚本修改 sys.path。
+[tool.setuptools]
+package-dir = { "" = "src/lib" }
+# 通用模块放在 utils 包中，由下面的包发现规则统一安装。
+
+
+# 自动发现包的规则。
+[tool.setuptools.packages.find]
+# 从下面这个目录开始寻找所有 Python 包。
+where = ["src/lib"]
+# namespaces=false 表示只识别包含 __init__.py 的标准 Python 包。
+# 这样可以避免把普通资源目录误认为包，也让包的边界更加清楚。
+namespaces = false
+
+# 将来增加新包时，例如 communication：
+#
+# my_project/src/lib/
+# ├── utils/
+# │   ├── __init__.py
+# │   ├── usb_camera.py
+# │   └── yolov8.py
+# └── communication/
+#     ├── __init__.py       <- 必须添加，可以是空文件
+#     └── my_ct_protocol.py
+#
+# 只要新包位于 src/lib 下并含有 __init__.py，本配置就会自动发现它，
+# 通常不需要修改 pyproject.toml。之后可以直接写：
+#     from communication import my_ct_protocol
+#
+# 如果新增包后，当前环境没有立即识别它，可在 my_project 项目根目录执行：
+#     python3 -m pip install -e .

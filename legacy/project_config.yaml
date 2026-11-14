@@ -1,0 +1,55 @@
+
+camera:
+  width: 1280
+  height: 720
+  FPS: 60
+  FOURCC: MJPG
+  max_pitch_deg: 80  # 0度水平，向下为正；限位约80.95度，整数指令最大80度。
+background_filter:
+  enabled: true
+  horizontal_fov_deg: 70
+  horizon_margin_px: 16
+yolo:
+  model_path: assets/models/11_11/train5.rknn
+  conf_threshold: 0.6
+  iou_threshold: 0.45
+uart:
+  baudrate: 115200
+  device: /dev/ttyS6
+point:
+# 判断合适追踪
+  x0: 640
+  y0: 550
+
+distribute:
+  # 临时动作：0-3秒前进，3-8秒边前进边旋转；由同一计时器逐帧判断。
+  # 当前动作：先直推5秒，再前进转圈7秒；后段误差-125，电脑约0.20m/s与0.90rad/s，扩大推转半径。
+  angle: 0
+  move_ms: 5000
+  scatter_ms: 7000
+  base_forward: -100
+  scatter_forward: -125
+  base_turn: 281
+
+trans:
+  # 候选参数：实际速度由STM32的PID决定，以下是像素误差限幅。
+  search_camera_1: 30
+  search_camera_2: 20
+  camera_settle_ms: 400
+  search_score_min: 10
+  lost_move: 200
+  lost_move_ms: 1000
+  first: true
+  confirm_frames: 3
+  track_gate_px: 150
+  align_px: 20
+  turn_only_px: 80
+  turn_limit_px: 100
+  move_limit_px: 180
+  distance_reward: 0.002
+  score:
+    green: 5
+    black: 5
+    orange: 2
+    count_reward: 4
+    our_safe: 6

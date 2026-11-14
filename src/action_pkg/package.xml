@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>action_pkg</name>
+  <version>0.1.0</version>
+  <description>Gongchuang robot action.</description>
+  <maintainer email="Kristinblue@users.noreply.github.com">Kristin</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>communication_pkg</depend>
+  <depend>vision_pkg</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

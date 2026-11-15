@@ -8,7 +8,7 @@
 
 ## GoTo 和 STM32
 
-`Task` 每收到一帧物块就调用 `GoTo.run()`。GoTo 用目标框底边中心和 `point.x0/y0` 算横向和前后像素误差，再调用 `MyCMD`。STM32 负责根据误差做 PID 控制。STM32 用 `01` 连续上报绝对角度。`MyCMD` 从发 `05` 相对转向前的角度开始累计，达到目标角度（允许 1° 误差）后将 `turn_done` 置为真。
+`Task` 每收到一帧物块就调用 `GoTo.run()`。GoTo 用目标框底边中心和 `point.x0/y0` 算横向和前后像素误差，再调用 `MyCMD`。STM32 负责根据误差做 PID 控制。`MyCMD` 直接发送 `05` 相对转角，用已有的 `01` 角度样本或者发令后的第一帧角度作为累计起点，达到目标角度（允许 1° 误差）后将 `turn_done` 置为真。
 
 命令编号和帧格式见[串口说明](../communication_pkg/README.md)。当前 `/task/start` 和 `/task/stop` 是服务。将来拆 GoTo 节点时，可以用 Action 管一次搜寻和靠近的目标、进度、结果和取消，逐帧像素误差仍走现有话题。
 

@@ -76,9 +76,7 @@ class MyCMD:
         self._send(TURN, speed)
 
     def move_turn_a(self,angle:int):
-        """有起始角度才发送相对转向，返回是否已接受请求。"""
-        if self.angle is None:
-            return False
+        """直接发送相对转角，返回是否已接受请求。"""
         self._turn_angle = max(-32768, min(32767, int(angle)))
         self._turned = 0
         self.turn_done = self._turn_angle == 0
@@ -91,7 +89,7 @@ class MyCMD:
         if feedback.code != Feedback.ANGLE or not 0 <= feedback.value <= 360:
             return
         angle = feedback.value % 360
-        if self._turn_angle:
+        if self._turn_angle and self.angle is not None:
             # 例如从 2° 顺时针转到 358°，差值是 -4°。命令正数表示顺时针。
             delta = (angle - self.angle + 180) % 360 - 180
             self._turned += -delta if self._turn_angle > 0 else delta
@@ -99,6 +97,10 @@ class MyCMD:
                 self.turn_done = True
                 self._turn_angle = 0
         self.angle = angle
+
+    def angle_calib(self, angle:int):
+        """绝对角度校准，利用安全区的，之后具体规定"""
+        self._send(ANGLE_CALIB, angle)
 
     def move_stop(self):
         """07停车，并清除旧的前进和转向误差，不改变夹爪。"""

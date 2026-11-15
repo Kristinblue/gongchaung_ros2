@@ -77,7 +77,7 @@ private:
     if (!state_.connected && !simulated_) return;
     // 06 校准参数待定，先保留编号。队伍查询参数固定为 0，夹爪只能 0/1。
     // 不合法的命令直接丢弃，不去赌下位机能不能处理。
-    if (message.code > Command::STOP || message.code == Command::ANGLE_CALIB ||
+    if (message.code > Command::STOP || (!simulated_ && message.code == Command::ANGLE_CALIB) ||
         (message.code == Command::GET_FLAG && message.value != 0) ||
         (message.code == Command::GRAB && (message.value < 0 || message.value > 1)) ||
         (message.code == Command::CAMERA && (message.value < 0 || message.value > max_pitch_deg))) return;

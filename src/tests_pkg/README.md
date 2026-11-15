@@ -44,3 +44,34 @@ ROS_DOMAIN_ID=27 ros2 topic echo /robot/serial_frames
 bash tools/preview.sh start camera_test
 journalctl _SYSTEMD_USER_UNIT=gongchuang-preview.service -f
 ```
+
+## 串口动作测试
+
+在客户端点「测试节点 → 运行串口测试」，选模拟串口或实车串口。右侧终端出现 `cmd>` 后直接输入命令。
+
+也可以从香橙派的仓库根目录启动：
+
+```bash
+bash tools/run.sh serial
+```
+
+脚本会同时启动串口桥接和交互测试。出现 `cmd>` 后直接输入命令，可以连续测试：
+
+```text
+cmd> move_straight 0
+cmd> move_straight -30
+cmd> move_turn 10
+cmd> move_turn_a 30
+cmd> grab 0
+cmd> camera 20
+cmd> angle_calib 90
+cmd> stop
+cmd> help
+cmd> quit
+```
+
+`move_straight` 调用 `cmd.move_staight()`。前后和转向误差指令均在 0.4 秒后停车。`move_turn_a` 直接发送相对转角，正值向右，负值向左。模拟串口也能查看它的发送帧。
+
+`angle_calib 90`（也可写 `set_angle 90`）调用 `MyCMD.angle_calib()`。`06` 的含义与参数定义待定，当前只在模拟串口打包。
+
+默认用模拟串口。接好 STM32 并腾出 UART 后，用 `bash tools/run.sh serial /dev/ttyS6` 启动实车测试。

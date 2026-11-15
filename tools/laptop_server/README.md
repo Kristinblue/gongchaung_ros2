@@ -14,9 +14,13 @@
 
 「测试节点」菜单列出 ROS 节点原名。选 `approach_test_node` 会启动 YOLO 和靠近测试，使用 `assets/models/train5.rknn`。误差发到 `/approach_test/command`。选 `camera_test_node` 会记录分辨率和实际帧率。客户端的靠近测试会发布运动命令，再由模拟串口打包。点「结束测试」回到原图。摄像头以 YUYV、10 fps 采图。
 
+「运行串口测试 · `serial_test_node`」可选「模拟串口」或「实车串口 · `/dev/ttyS6`」。右侧终端出现 `cmd>` 后直接输入 `move_straight 0`、`move_straight -30` 或 `stop`。`quit` 或「结束测试」会回到 SSH 提示符。实车测试前先腾出串口。
+
 右侧「串口」页按一行一帧显示最近 100 帧十六进制数据。`TX` 是发出，`RX` 是收到的有效帧，`TX [SIM]` 是模拟模式下打包的帧。
 
 SSH 终端会把输入命令和收到的标准输出、错误输出写到本机。下一次连接会覆盖记录，可以随时删除。
+
+在 `$` 或 `cmd>` 提示符后直接输入。左右键移动光标，上下键翻历史。输出可以拖选、双击选词和按 `Ctrl+C` 复制，命令行支持 `Ctrl+V` 粘贴。
 
 ```powershell
 Get-Content "$env:LOCALAPPDATA/Gongchuang/GongchuangClient/ssh-terminal.log" -Encoding utf8 -Wait -Tail 30

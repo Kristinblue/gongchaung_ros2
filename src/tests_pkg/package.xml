@@ -7,6 +7,7 @@
   <license>Proprietary</license>
   <buildtool_depend>ament_python</buildtool_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>communication_pkg</exec_depend>
   <depend>std_srvs</depend>
   <depend>sensor_msgs</depend>
   <depend>robot_interfaces</depend>

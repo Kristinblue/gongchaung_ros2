@@ -1,5 +1,4 @@
 #include <QApplication>
-#include <QClipboard>
 #include <QColor>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -18,12 +17,13 @@
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QClipboard>
+#include <QPaintEvent>
+#include <QPainter>
 #include <QMenu>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
 #include <QNetworkReply>
-#include <QPaintEvent>
-#include <QPainter>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProcess>
@@ -46,149 +46,193 @@
 #include <QVBoxLayout>
 #include <functional>
 
-// 简单的行内终端：提示符、输入、输出都在同一个文本区，支持常见 ANSI 颜色。
-// 显示 SSH 远端命令的输出，并把输入的一行命令交给 Client。
+// 显示 SSH 远端命令的输出，并把提示符后的输入交给 Client。
 class Terminal : public QPlainTextEdit {
 public:
   std::function<void(const QString &)> onCommand;
   std::function<void()> onInterrupt;
 
   explicit Terminal(QWidget *parent = nullptr) : QPlainTextEdit(parent) {
+    setObjectName("output");
     setReadOnly(true);
-    setFrameShape(QFrame::NoFrame);
-    setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    setFocusPolicy(Qt::StrongFocus);
-    setCursorWidth(2);
-    base_ = QTextCharFormat();
+    setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    setAcceptDrops(false);
+    viewport()->setAcceptDrops(false);
+    setMaximumBlockCount(2000);
     base_.setForeground(QColor("#d4d4d4"));
-    blink_.setInterval(530);
     connect(&blink_, &QTimer::timeout, this, [this] {
       blinkOn_ = !blinkOn_;
-      viewport()->update();
+      if (hasFocus()) viewport()->update(cursorRect());
     });
-    blink_.start();
+    blink_.start(530);
   }
 
   void setPrompt(const QString &text) { prompt_ = text; }
-  void reset() {
-    clear();
-    line_.clear();
-    busy_ = false;
+  void setTestPrompt(bool enabled) {
+    if (enabled == testPrompt_) return;
+    testPrompt_ = enabled;
+    resetHistoryPosition();
+  }
+  void waitForOutput() {
+    if (ready_) {
+      auto cursor = promptCursor_;
+      cursor.movePosition(QTextCursor::End, QTextCursor::KeepAnchor);
+      cursor.removeSelectedText();
+    }
     ready_ = false;
+    busy_ = true;
+    resetHistoryPosition();
+  }
+  void reset() {
+    ready_ = busy_ = false;
+    promptCursor_ = {};
+    clear();
+    resetHistoryPosition();
   }
   void showNotice(const QString &text) {
     reset();
-    QTextCharFormat format;
-    format.setForeground(QColor("#c5cfdd"));
-    writeText(text, format);
+    writeText(text, base_);
   }
-  void showPrompt() {
-    ready_ = true;
-    const int colon = prompt_.indexOf(':');
-    const int dollar = prompt_.lastIndexOf('$');
-    if (colon > 0 && dollar > colon) {
-      writeText(prompt_.left(colon), promptFormat());
-      QTextCharFormat pathFormat;
-      pathFormat.setForeground(QColor("#569cd6"));
-      writeText(prompt_.mid(colon, dollar - colon), pathFormat);
-      writeText(prompt_.mid(dollar) + " ", base_);
-    } else {
-      writeText(prompt_ + " ", promptFormat());
-    }
-    line_.clear();
+  void showPrompt() { finish(); }
+  void writeData(QString data) {
+    if (!data.endsWith('\n')) data += '\n';
+    ansi(data);
   }
-  void writeData(const QString &data) { ansi(data); }
   void finish() {
+    if (ready_) return;
     busy_ = false;
-    if (!toPlainText().endsWith('\n')) writeText("\n", base_);
-    showPrompt();
+    const auto prompt = (testPrompt_ ? QString("cmd>") : prompt_) + " ";
+    writeText(prompt, promptFormat());
+    promptCursor_ = QTextCursor(document());
+    promptCursor_.movePosition(QTextCursor::End);
+    promptCursor_.setPosition(promptCursor_.position() - prompt.size());
+    promptLength_ = prompt.size();
+    ready_ = true;
+    if (!textCursor().hasSelection()) moveCursor(QTextCursor::End);
   }
 
 protected:
   void paintEvent(QPaintEvent *event) override {
     QPlainTextEdit::paintEvent(event);
-    if (!ready_ || !hasFocus() || !blinkOn_) return;
-    QPainter painter(viewport());
+    if (!ready_ || !hasFocus() || !blinkOn_ || textCursor().hasSelection()) return;
     auto rect = cursorRect();
     rect.setWidth(2);
-    painter.fillRect(rect, QColor("#d4d4d4"));
+    QPainter(viewport()).fillRect(rect, QColor("#d4d4d4"));
   }
 
-  void focusInEvent(QFocusEvent *event) override {
-    QPlainTextEdit::focusInEvent(event);
-    viewport()->update();
-  }
-
-  void focusOutEvent(QFocusEvent *event) override {
-    QPlainTextEdit::focusOutEvent(event);
-    viewport()->update();
-  }
-
-  void mousePressEvent(QMouseEvent *event) override {
-    QPlainTextEdit::mousePressEvent(event);
-    auto cursor = textCursor();
-    cursor.movePosition(QTextCursor::End);
-    setTextCursor(cursor);
-    viewport()->update();
-  }
-
-  void keyPressEvent(QKeyEvent *event) override {
-    if (event->matches(QKeySequence::Copy)) {
-      QPlainTextEdit::keyPressEvent(event);
+  void keyPressEvent(QKeyEvent *key) override {
+    if (key->matches(QKeySequence::Copy)) {
+      if (textCursor().hasSelection()) copy();
+      else if (busy_ && onInterrupt) onInterrupt();
       return;
     }
-    if (!ready_) return;
-    if (busy_) {
-      if (event->key() == Qt::Key_C && (event->modifiers() & Qt::ControlModifier)) {
-        if (onInterrupt) onInterrupt();
-      }
+    if (!ready_) {
+      QPlainTextEdit::keyPressEvent(key);
       return;
     }
-    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
-      const auto command = line_;
-      writeText("\n", base_);
-      line_.clear();
-      if (command.trimmed().isEmpty()) {
-        showPrompt();
-      } else if (onCommand) {
-        busy_ = true;
-        onCommand(command);
-      }
+    if (key->modifiers() == Qt::ControlModifier && key->key() == Qt::Key_L) {
+      const auto draft = commandText();
+      reset();
+      finish();
+      insertInput(draft);
       return;
     }
-    if (event->key() == Qt::Key_Backspace) {
-      if (!line_.isEmpty()) {
-        line_.chop(1);
+    switch (key->key()) {
+      case Qt::Key_Up: recall(-1); return;
+      case Qt::Key_Down: recall(1); return;
+      case Qt::Key_Left:
+        if (!textCursor().hasSelection() && textCursor().position() == inputStart()) return;
+        break;
+      case Qt::Key_Return:
+      case Qt::Key_Enter: submit(); return;
+      case Qt::Key_Home:
+      case Qt::Key_End: {
         auto cursor = textCursor();
-        cursor.movePosition(QTextCursor::End);
-        cursor.deletePreviousChar();
+        cursor.setPosition(key->key() == Qt::Key_Home ? inputStart() : document()->characterCount() - 1,
+                           key->modifiers().testFlag(Qt::ShiftModifier) ? QTextCursor::KeepAnchor : QTextCursor::MoveAnchor);
         setTextCursor(cursor);
+        return;
       }
-      return;
-    }
-    if (event->key() == Qt::Key_L && (event->modifiers() & Qt::ControlModifier)) {
-      clear();
-      line_.clear();
-      showPrompt();
-      return;
-    }
-    if (event->key() == Qt::Key_V && (event->modifiers() & Qt::ControlModifier)) {
-      for (const QChar ch : QGuiApplication::clipboard()->text()) {
-        if (ch.isPrint()) {
-          writeText(QString(ch), base_);
-          line_ += ch;
-        }
+      case Qt::Key_Backspace:
+      case Qt::Key_Delete: {
+        auto cursor = inputCursor();
+        if (cursor.hasSelection()) cursor.removeSelectedText();
+        else if (key->key() == Qt::Key_Delete) cursor.deleteChar();
+        else if (cursor.position() > inputStart()) cursor.deletePreviousChar();
+        setTextCursor(cursor);
+        return;
       }
-      return;
+      default: break;
     }
-    const auto text = event->text();
-    if (!text.isEmpty() && text[0].isPrint()) {
-      writeText(text, base_);
-      line_ += text;
+    if (key->matches(QKeySequence::Paste)) {
+      insertInput(QApplication::clipboard()->text());
+    } else if (!key->text().isEmpty() && key->text().front().isPrint() &&
+               !key->modifiers().testFlag(Qt::ControlModifier)) {
+      insertInput(key->text());
+    } else {
+      QPlainTextEdit::keyPressEvent(key);
     }
   }
 
 private:
+  int inputStart() const { return promptCursor_.position() + promptLength_; }
+
+  // 光标选中旧输出时还能复制，编辑命令时只允许更改提示符后面的文字。
+  QTextCursor inputCursor() const {
+    auto cursor = textCursor();
+    if (cursor.selectionStart() < inputStart()) cursor.movePosition(QTextCursor::End);
+    return cursor;
+  }
+
+  void insertInput(QString text) {
+    text.replace('\r', ' ').replace('\n', ' ');
+    auto cursor = inputCursor();
+    cursor.insertText(text, base_);
+    setTextCursor(cursor);
+    ensureCursorVisible();
+  }
+
+  QString commandText() const {
+    auto cursor = promptCursor_;
+    cursor.setPosition(inputStart());
+    cursor.movePosition(QTextCursor::End, QTextCursor::KeepAnchor);
+    return cursor.selectedText();
+  }
+
+  QStringList &history() { return testPrompt_ ? testHistory_ : shellHistory_; }
+
+  void resetHistoryPosition() {
+    historyIndex_ = history().size();
+    draft_.clear();
+  }
+
+  void recall(int step) {
+    const auto &entries = history();
+    if (historyIndex_ == entries.size()) draft_ = commandText();
+    historyIndex_ = qBound(qsizetype(0), historyIndex_ + step, entries.size());
+    auto cursor = promptCursor_;
+    cursor.setPosition(inputStart());
+    cursor.movePosition(QTextCursor::End, QTextCursor::KeepAnchor);
+    setTextCursor(cursor);
+    insertInput(historyIndex_ == entries.size() ? draft_ : entries[historyIndex_]);
+  }
+
+  void submit() {
+    const auto command = commandText();
+    if (!command.trimmed().isEmpty() && !onCommand) return;
+    ready_ = false;
+    writeText("\n", base_);
+    if (command.trimmed().isEmpty()) {
+      finish();
+      return;
+    }
+    auto &entries = history();
+    if (entries.isEmpty() || entries.last() != command) entries.append(command);
+    if (entries.size() > 100) entries.removeFirst();
+    waitForOutput();
+    onCommand(command);
+  }
+
   static QTextCharFormat promptFormat() {
     QTextCharFormat format;
     format.setForeground(QColor("#35c46a"));
@@ -197,19 +241,22 @@ private:
   }
 
   void writeText(const QString &text, const QTextCharFormat &format) {
-    auto cursor = textCursor();
-    cursor.movePosition(QTextCursor::End);
+    auto *scroll = verticalScrollBar();
+    const bool follow = scroll->value() == scroll->maximum() && !textCursor().hasSelection();
+    QTextCursor cursor = ready_ ? promptCursor_ : QTextCursor(document());
+    if (!ready_) cursor.movePosition(QTextCursor::End);
     cursor.insertText(text, format);
-    setTextCursor(cursor);
-    ensureCursorVisible();
+    if (follow) scroll->setValue(scroll->maximum());
   }
 
   // 远端输出可能带终端颜色控制码，转换成 Qt 的文字格式再显示。
   void ansi(const QString &data) {
     QTextCharFormat format;
     format.setForeground(QColor("#d4d4d4"));
-    auto cursor = textCursor();
-    cursor.movePosition(QTextCursor::End);
+    auto *scroll = verticalScrollBar();
+    const bool follow = scroll->value() == scroll->maximum() && !textCursor().hasSelection();
+    QTextCursor cursor = ready_ ? promptCursor_ : QTextCursor(document());
+    if (!ready_) cursor.movePosition(QTextCursor::End);
     int i = 0;
     while (i < data.size()) {
       if (data[i] == QChar(0x1b)) {
@@ -235,8 +282,7 @@ private:
       while (i < data.size() && data[i] != QChar(0x1b)) ++i;
       cursor.insertText(data.mid(start, i - start), format);
     }
-    setTextCursor(cursor);
-    ensureCursorVisible();
+    if (follow) scroll->setValue(scroll->maximum());
   }
 
   static void applySgr(const QString &params, QTextCharFormat &format) {
@@ -275,9 +321,14 @@ private:
   }
 
   QString prompt_{"$"};
-  QString line_;
+  QString draft_;
+  QStringList shellHistory_, testHistory_;
+  qsizetype historyIndex_{0};
   bool busy_{false};
   bool ready_{false};
+  bool testPrompt_{false};
+  QTextCursor promptCursor_;
+  int promptLength_{0};
   bool blinkOn_{true};
   QTimer blink_;
   QTextCharFormat base_;
@@ -312,10 +363,17 @@ public:
     connection->addWidget(mode_, 0);
     connection->addWidget(connect_);
     auto *tests = new QMenu(previewStart_);
-    tests->addAction("运行靠近测试 · approach_test_node", this, [this] { runPreview("start approach"); });
-    tests->addAction("运行摄像头测试 · camera_test_node", this, [this] { runPreview("start camera_test"); });
+    auto *approachTest = tests->addAction("运行靠近测试 · approach_test_node", this, [this] { runPreview("start approach"); });
+    auto *cameraTest = tests->addAction("运行摄像头测试 · camera_test_node", this, [this] { runPreview("start camera_test"); });
+    auto *serialTests = tests->addMenu("运行串口测试 · serial_test_node");
     tests->addSeparator();
-    tests->addAction("结束测试", this, [this] { runPreview("start preview"); });
+    tests->addAction("结束测试", this, [this] {
+      if (serialTest_) execute("quit");
+      else runPreview("start preview");
+    });
+    connect(tests, &QMenu::aboutToShow, this, [this, approachTest, cameraTest, serialTests] {
+      for (auto *action : {approachTest, cameraTest, serialTests->menuAction()}) action->setEnabled(!serialTest_);
+    });
     previewStart_->setObjectName("testMenu");
     previewStart_->setText("测试节点  ▼");
     tests->setObjectName("testChoices");
@@ -365,8 +423,6 @@ public:
     auto *terminal = new QVBoxLayout(right);
     terminal->setContentsMargins(12, 10, 12, 10);
     terminal->setSpacing(0);
-    term_->setObjectName("output");
-    term_->setMaximumBlockCount(2000);
     auto fixed = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     fixed.setPointSize(11);
     term_->setFont(fixed);
@@ -376,6 +432,14 @@ public:
     auto *rightTabs = new QTabWidget;
     rightTabs->setObjectName("rightTabs");
     rightTabs->addTab(right, "终端");
+    serialTests->addAction("模拟串口", this, [this, rightTabs] {
+      rightTabs->setCurrentIndex(0);
+      startSerialTest();
+    });
+    serialTests->addAction("实车串口 · /dev/ttyS6", this, [this, rightTabs] {
+      rightTabs->setCurrentIndex(0);
+      startSerialTest("/dev/ttyS6");
+    });
     auto *serialPage = new QWidget;
     serialPage->setObjectName("serialPage");
     auto *serialLayout = new QVBoxLayout(serialPage);
@@ -452,8 +516,10 @@ public:
         term_->setPrompt(lines[0].trimmed() + "@" + lines[1].trimmed() + ":~$");
       else
         term_->setPrompt(target_);
-      term_->reset();
-      term_->showPrompt();
+      if (!pending_ && !serialTest_) {
+        term_->reset();
+        term_->showPrompt();
+      }
     });
     connect(&ssh_, &QProcess::finished, this, [this](int, QProcess::ExitStatus) {
       if (active_) {
@@ -487,13 +553,27 @@ public:
       }
       static const QByteArray marker = "\n__GC_DONE__";
       const int at = shellBuffer_.indexOf(marker);
-      if (at < 0) return;
+      if (at < 0) {
+        // Python 的 input() 输出提示符后等待输入，此时将终端交给测试节点。
+        if (serialTest_ && pending_ && shellBuffer_.endsWith("cmd> ")) {
+          shellBuffer_.chop(5);
+          if (!shellBuffer_.isEmpty()) term_->writeData(QString::fromUtf8(shellBuffer_));
+          shellBuffer_.clear();
+          pending_ = false;
+          term_->setTestPrompt(true);
+          term_->finish();
+          updateControls();
+        }
+        return;
+      }
       const int end = shellBuffer_.indexOf('\n', at + marker.size());
       if (end < 0) return;
       const auto commandOutput = shellBuffer_.left(at);
       shellBuffer_.remove(0, end + 1);
       if (!pending_) return;
       pending_ = false;
+      serialTest_ = false;
+      term_->setTestPrompt(false);
       if (!commandOutput.isEmpty()) term_->writeData(QString::fromUtf8(commandOutput));
       term_->finish();
       updateControls();
@@ -592,6 +672,7 @@ private:
     pending_ = false;
     shellBuffer_.clear();
     shellReady_ = false;
+    serialTest_ = false;
     serialLines_.clear();
     serialSeq_ = -1;
     serialFrames_->clear();
@@ -600,6 +681,7 @@ private:
     image_->setPixmap(QPixmap());
     image_->setText("等待画面");
     term_->setPrompt("$");
+    term_->setTestPrompt(false);
     term_->showNotice("未连接");
     status_->setText(message);
     stageLabel_->setText("阶段  —");
@@ -624,7 +706,7 @@ private:
         status_->setText(shellReady_ ? "等待画面服务" : "正在连接香橙派");
         stageLabel_->setText("阶段  —");
         showSerial();
-        if (shellReady_ && !pending_ && !previewRequested_) runPreview("ensure-preview");
+        if (shellReady_ && !pending_ && !serialTest_ && !previewRequested_) runPreview("ensure-preview");
         if (video_) video_->abort();
         clearVideo();
       } else {
@@ -646,6 +728,7 @@ private:
           clearVideo();
         }
       }
+      if (serialTest_) stageLabel_->setText("阶段  serial_test_node");
       updateControls();
     });
   }
@@ -775,13 +858,40 @@ private:
       term_->finish();
       return;
     }
+    if (serialTest_) {
+      pending_ = true;
+      term_->waitForOutput();
+      logTerminal(("cmd> " + text + "\n").toUtf8());
+      shell_.write((text + "\n").toUtf8());
+      updateControls();
+      return;
+    }
     auto remote = text;
     if (QRegularExpression("^ls(\\s|$)").match(text).hasMatch() && !text.contains("--color"))
       remote.replace(0, 2, "ls --color=always");
+    term_->waitForOutput();
     pending_ = true;
     logTerminal(("$ " + text + "\n").toUtf8());
     updateControls();
     shell_.write((remote + "\nprintf '\\n__GC_DONE__%s\\n' $?\n").toUtf8());
+  }
+
+  void startSerialTest(const QString &device = {}) {
+    if (!shellReady_ || pending_ || serialTest_) return;
+    term_->setFocus();
+    term_->waitForOutput();
+    serialTest_ = pending_ = true;
+    stageLabel_->setText("阶段  serial_test_node");
+    updateControls();
+    // 结束标记与启动命令在同一行解析，避免测试节点把它读成第一条输入。
+    const auto command = QStringLiteral(
+      "test_ready() { [ -x \"$1/install/tests_pkg/lib/tests_pkg/serial_test_node\" ]; }; "
+      "ws=\"$HOME/my_ws/gongchuang_ros2\"; "
+      "if ! test_ready \"$ws\"; then ws=\"$HOME/.local/share/gongchuang_ros2_sync\"; fi; "
+      "if test_ready \"$ws\"; then bash \"$ws/tools/run.sh\" serial %1; "
+      "else echo '请先在香橙派编译串口测试节点'; false; fi; "
+      "printf '\\n__GC_DONE__%s\\n' $?\n").arg(device);
+    shell_.write(command.toUtf8());
   }
 
   void runPreview(const QString &action) {
@@ -833,6 +943,7 @@ private:
   QTimer poll_;
   QByteArray buffer_, shellBuffer_;
   bool pending_{false};
+  bool serialTest_{false};
   bool shellReady_{false};
   bool previewRequested_{false};
   QImage frame_;

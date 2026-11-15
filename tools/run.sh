@@ -8,4 +8,9 @@ if [[ -x tools/.venv/bin/python3 ]]; then
   export PATH="$VIRTUAL_ENV/bin:$PATH"
 fi
 export ROS_LOG_DIR="${ROS_LOG_DIR:-$PWD/tools/logs/ros}"
-exec ros2 launch desktop_server_pkg robot.launch.py "$@"
+launch=robot.launch.py
+if [[ ${1:-} == approach ]]; then
+  launch=approach_test.launch.py
+  shift
+fi
+exec ros2 launch robot_launch "$launch" "$@"

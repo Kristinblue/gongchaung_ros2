@@ -1,4 +1,0 @@
-std_msgs/Header header
-uint32 width
-uint32 height
-vision_pkg/Object[] items

@@ -1,5 +1,6 @@
 /build/
 /install/
+/log/
 /tools/logs/colcon/
 __pycache__/
 *.py[cod]
@@ -10,7 +11,9 @@ __pycache__/
 .idea/
 *.user
 CMakeUserPresets.json
-models/
+/assets/models/*
+!/assets/models/.gitkeep
+/tools/models/
 *.rknn
 *.onnx
 *.pt
@@ -27,4 +30,5 @@ models/
 /tools/laptop_server/build/
 /tools/laptop_server/GongchuangClient.zip
 /tools/logs/ros/
+# 笔记本的文件，这里写一些日常改进用的，方便我自己查看
 /.obsidian/

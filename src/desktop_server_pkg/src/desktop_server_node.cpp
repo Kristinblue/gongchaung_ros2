@@ -13,35 +13,38 @@
 #include <opencv2/opencv.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
-#include <std_msgs/msg/string.hpp>
-#include <communication_pkg/msg/state.hpp>
-#include <vision_pkg/msg/objects.hpp>
+#include <robot_interfaces/msg/match_state.hpp>
+#include <robot_interfaces/msg/state.hpp>
+#include <robot_interfaces/msg/objects.hpp>
 #include <rcl_interfaces/srv/get_parameters.hpp>
 #include <rcl_interfaces/srv/set_parameters_atomically.hpp>
 #include "httplib.h"
 
 using namespace std::chrono_literals;
 using Image = sensor_msgs::msg::Image;
-using Objects = vision_pkg::msg::Objects;
-using RobotState = communication_pkg::msg::State;
+using Objects = robot_interfaces::msg::Objects;
+using RobotState = robot_interfaces::msg::State;
+using MatchState = robot_interfaces::msg::MatchState;
 using ReadSettings = rcl_interfaces::srv::GetParameters;
 using WriteSettings = rcl_interfaces::srv::SetParametersAtomically;
 
+// 香橙派上的预览服务：读 ROS 画面和状态，给电脑提供 JPEG 视频、状态和设置。
 class DesktopServer : public rclcpp::Node {
 public:
   DesktopServer() : Node("desktop_server_node") {
     const auto host = declare_parameter("host", "127.0.0.1");
     const int port = declare_parameter("port", 8080);
     const auto source = declare_parameter("camera_source", "usb");
-    browser_ = source == "browser";
-    if (!browser_ && source != "usb" && source != "http") throw std::invalid_argument("camera_source");
+    if (source != "usb" && source != "http") throw std::invalid_argument("camera_source");
     const auto width = declare_parameter("preview_width", 640);
     const auto height = declare_parameter("preview_height", 360);
     quality_ = declare_parameter("jpeg_quality", 65);
     if (port < 1 || port > 65535 || width < 1 || height < 1 || quality_ < 25 || quality_ > 90)
       throw std::invalid_argument("HTTP port, preview dimensions or JPEG quality");
-    read_settings_ = create_client<ReadSettings>("yolo_node/get_parameters");
-    write_settings_ = create_client<WriteSettings>("yolo_node/set_parameters_atomically");
+    // 置信度属于推理节点。HTTP 收到设置后，通过 ROS 参数服务转给推理节点。
+    read_settings_ = create_client<ReadSettings>("inference_node/get_parameters");
+    write_settings_ = create_client<WriteSettings>("inference_node/set_parameters_atomically");
+    // 这几个 ROS callback 只存最新值，绘图和压缩交给下面的 encode_loop。
     robot_ = create_subscription<RobotState>("robot/state", rclcpp::QoS(1).transient_local(),
       [this](const RobotState &state) {
         std::lock_guard lock(mutex_);
@@ -52,52 +55,20 @@ public:
         std::lock_guard lock(mutex_);
         selected_ = std::move(message);
       });
-    status_ = create_subscription<std_msgs::msg::String>("task/state", rclcpp::QoS(1).transient_local(),
-      [this](const std_msgs::msg::String &message) {
+    status_ = create_subscription<MatchState>("match/state", rclcpp::QoS(1).transient_local(),
+      [this](const MatchState &message) {
         std::lock_guard lock(mutex_);
-        status_text_ = message.data;
-        const auto start = message.data.find("\"stage\":\"");
-        if (start != std::string::npos) {
-          const auto end = message.data.find('"', start + 9);
-          stage_ = message.data.substr(start + 9, end - (start + 9));
-        }
+        stage_ = message.stage;
+        frames_ = message.frames;
+        if (stage_ != "track") selected_.reset();
       });
     input_ = create_subscription<Image>("vision/preview", rclcpp::SensorDataQoS().keep_last(1),
       [this](Image::ConstSharedPtr image) {
         std::lock_guard lock(mutex_);
         newest_ = std::move(image);
+        frame_received_ = std::chrono::steady_clock::now();
       });
 
-    if (browser_) {
-      camera_ = create_publisher<Image>("camera/image", rclcpp::SensorDataQoS().keep_last(1));
-      server_.Post("/camera", [this](const auto &request, auto &response) {
-        if (!request.has_header("X-Gongchuang-Client") || request.get_header_value("Content-Type") != "image/jpeg") {
-          response.status = 415;
-          return;
-        }
-        std::unique_lock upload_lock(upload_mutex_, std::try_to_lock);
-        if (!upload_lock || request.body.empty() || request.body.size() > 512 * 1024) {
-          response.status = upload_lock ? 413 : 429;
-          return;
-        }
-        if (std::chrono::steady_clock::now() - last_upload_ < 90ms) {
-          response.status = 429;
-          return;
-        }
-        try {
-          auto image = decode(request.body);
-          if (!image) {
-            response.status = 400;
-            return;
-          }
-          camera_->publish(*image);
-          last_upload_ = std::chrono::steady_clock::now();
-          response.status = 204;
-        } catch (const cv::Exception &) {
-          response.status = 400;
-        }
-      });
-    }
     server_.set_socket_options([](socket_t socket) {
       int enabled = 1;
       setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char *>(&enabled), sizeof(enabled));
@@ -110,14 +81,18 @@ public:
       std::ifstream file(ament_index_cpp::get_package_share_directory("desktop_server_pkg") + "/web/index.html");
       response.set_content(std::string(std::istreambuf_iterator<char>(file), {}), "text/html; charset=utf-8");
     });
+    // callback：客户端轮询 /status，读取当前任务阶段、视频是否可用、以及可调的设置。
     server_.Get("/status", [this, source](const auto &, auto &response) {
       const auto confidence = read_confidence();
       std::lock_guard lock(mutex_);
       auto json = "{\"camera_source\":\"" + source + "\",\"jpeg_quality\":" +
-        std::to_string(quality_.load()) + ",\"task\":" + status_text_;
+        std::to_string(quality_.load()) + ",\"task\":{\"stage\":\"" + (stage_.empty() ? "preview" : stage_) +
+        "\",\"frames\":" + std::to_string(frames_) + "}";
+      json += video_available() ? ",\"video_available\":true" : ",\"video_available\":false";
       if (confidence) json += ",\"confidence\":" + std::to_string(*confidence);
       response.set_content(json + "}", "application/json");
     });
+    // callback：JPEG 质量本节点就能改。置信度要等推理节点确认，之后才回复成功。
     server_.Post("/settings", [this](const auto &request, auto &response) {
       if (!request.has_header("X-Gongchuang-Client") ||
           (!request.has_param("jpeg_quality") && !request.has_param("confidence"))) {
@@ -154,6 +129,7 @@ public:
         response.set_content("{\"error\":\"JPEG 质量须为 25～90，置信度须为 0～1\"}", "application/json");
       }
     });
+    // callback：一个 HTTP 请求保持打开，每一段发送一张完整 JPEG。
     server_.Get("/video", [this](const auto &, auto &response) {
       if (viewers_.fetch_add(1) >= 3) {
         --viewers_;
@@ -162,13 +138,14 @@ public:
       }
       response.set_header("Cache-Control", "no-store");
       response.set_chunked_content_provider("multipart/x-mixed-replace; boundary=frame",
+        // 每个客户端各自记住上次发过的 JPEG 编号 seen。拿到 JPEG 后先解锁再发网络数据。
         [this, seen = uint64_t{0}](size_t, httplib::DataSink &sink) mutable {
           std::shared_ptr<const std::vector<uchar>> jpeg;
           {
             std::unique_lock lock(mutex_);
-            ready_.wait_for(lock, 1s, [&] { return stop_ || serial_ != seen; });
+            ready_.wait_for(lock, 1s, [&] { return stop_ || (serial_ != seen && video_available()); });
             if (stop_ || !sink.is_writable()) return false;
-            if (serial_ == seen) return true;
+            if (serial_ == seen || !video_available()) return true;
             seen = serial_;
             jpeg = jpeg_;
           }
@@ -179,6 +156,7 @@ public:
         }, [this](bool) { --viewers_; });
     });
     if (!server_.bind_to_port(host, port)) throw std::runtime_error("无法监听 HTTP 端口");
+    // HTTP 接请求和图像压缩各跑各的，ROS 的 spin 在 main() 里继续接话题和参数服务回复。
     http_ = std::thread([this] { server_.listen_after_bind(); });
     encode_ = std::thread([=] { encode_loop(width, height); });
     RCLCPP_INFO(get_logger(), "[DesktopServer] http://%s:%d (%s)", host.c_str(), port, source.c_str());
@@ -193,10 +171,11 @@ public:
   }
 
 private:
+  // 只开预览时没有 YOLO 节点。这时用 nullopt 表示拿不到置信度，客户端会禁用对应的设置。
   std::optional<double> read_confidence() {
     if (!read_settings_->service_is_ready()) return std::nullopt;
     auto request = std::make_shared<ReadSettings::Request>();
-    request->names = {"confidence"};
+    request->names = {"yolo.conf_threshold"};
     auto result = read_settings_->async_send_request(request);
     if (result.wait_for(400ms) != std::future_status::ready) {
       read_settings_->remove_pending_request(result);
@@ -211,7 +190,7 @@ private:
   bool write_confidence(double confidence) {
     if (!write_settings_->service_is_ready()) return false;
     auto request = std::make_shared<WriteSettings::Request>();
-    request->parameters.push_back(rclcpp::Parameter("confidence", confidence).to_parameter_msg());
+    request->parameters.push_back(rclcpp::Parameter("yolo.conf_threshold", confidence).to_parameter_msg());
     auto result = write_settings_->async_send_request(request);
     if (result.wait_for(1500ms) != std::future_status::ready) {
       write_settings_->remove_pending_request(result);
@@ -220,20 +199,12 @@ private:
     return result.get()->result.successful;
   }
 
-  Image::SharedPtr decode(const std::string &body) {
-    const auto frame = cv::imdecode(std::vector<uchar>(body.begin(), body.end()), cv::IMREAD_COLOR);
-    if (frame.empty() || frame.cols > 1920 || frame.rows > 1080) return {};
-    auto image = std::make_shared<Image>();
-    image->header.stamp = now();
-    image->header.frame_id = "browser_camera";
-    image->width = frame.cols;
-    image->height = frame.rows;
-    image->encoding = "bgr8";
-    image->step = frame.cols * 3;
-    image->data.assign(frame.data, frame.data + image->step * image->height);
-    return image;
+  // newest_ 还可能留着旧图。两秒没收到新画面，就向客户端报告无视频。
+  bool video_available() const {
+    return newest_ && std::chrono::steady_clock::now() - frame_received_ < 2s;
   }
 
+  // 每 100 ms 检查一次。先在锁内取出最新画面和状态，缩放、画框和压缩都放在锁外。
   void encode_loop(int width, int height) {
     Image::ConstSharedPtr last;
     int last_quality = 0;
@@ -248,11 +219,12 @@ private:
       std::optional<int> angle;
       {
         std::lock_guard lock(mutex_);
-        image = newest_;
+        if (video_available()) image = newest_;
         selected = selected_;
         stage = stage_;
         angle = camera_angle_;
       }
+      // 目标框和画面必须是同一帧，避免把前一帧的框画到新画面上。
       const int quality = quality_;
       const bool has_target = image && stage == "track" && selected &&
         selected->header.stamp == image->header.stamp && !selected->items.empty();
@@ -280,6 +252,7 @@ private:
           if (!display_stage.empty()) cv::putText(small, display_stage, {8,18}, cv::FONT_HERSHEY_SIMPLEX, .5, {30,210,250}, 1, cv::LINE_AA);
           if (angle) cv::putText(small, "cam_angle: " + std::to_string(*angle), {8,38},
             cv::FONT_HERSHEY_SIMPLEX, .5, {30,210,250}, 1, cv::LINE_AA);
+          // 新 JPEG 编好后再换掉缓存。正在发送上一张的客户端仍持有它自己的 shared_ptr。
           auto jpeg = std::make_shared<std::vector<uchar>>();
           if (cv::imencode(".jpg", small, *jpeg, {cv::IMWRITE_JPEG_QUALITY, quality})) {
             {
@@ -303,18 +276,18 @@ private:
   }
 
   httplib::Server server_;
-  std::mutex mutex_, upload_mutex_;
+  // ROS callback、压缩线程和 HTTP 请求共享画面和状态，用同一把锁取值或更新。
+  std::mutex mutex_;
   std::condition_variable ready_;
   std::atomic<bool> stop_{false};
   std::atomic<int> quality_{65}, viewers_{0};
-  bool browser_{false};
-  std::chrono::steady_clock::time_point last_upload_{};
+  std::chrono::steady_clock::time_point frame_received_{};
   std::thread http_, encode_;
   Image::ConstSharedPtr newest_;
   std::shared_ptr<const std::vector<uchar>> jpeg_;
   uint64_t serial_{0};
-  std::string status_text_{"{\"stage\":\"preview\"}"};
   std::string stage_;
+  uint64_t frames_{0};
   std::optional<int> camera_angle_;
   Objects::ConstSharedPtr selected_;
   rclcpp::Client<ReadSettings>::SharedPtr read_settings_;
@@ -322,8 +295,7 @@ private:
   rclcpp::Subscription<RobotState>::SharedPtr robot_;
   rclcpp::Subscription<Objects>::SharedPtr target_;
   rclcpp::Subscription<Image>::SharedPtr input_;
-  rclcpp::Publisher<Image>::SharedPtr camera_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr status_;
+  rclcpp::Subscription<MatchState>::SharedPtr status_;
 };
 
 int main(int argc, char **argv) {

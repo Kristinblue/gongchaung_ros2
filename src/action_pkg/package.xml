@@ -5,11 +5,12 @@
   <description>Gongchuang robot action.</description>
   <maintainer email="Kristinblue@users.noreply.github.com">Kristin</maintainer>
   <license>Proprietary</license>
-  <buildtool_depend>ament_cmake</buildtool_depend>
-  <depend>rclcpp</depend>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend>
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
-  <depend>communication_pkg</depend>
+  <depend>robot_interfaces</depend>
+  <exec_depend>communication_pkg</exec_depend>
   <depend>vision_pkg</depend>
-  <export><build_type>ament_cmake</build_type></export>
+  <export><build_type>ament_python</build_type></export>
 </package>

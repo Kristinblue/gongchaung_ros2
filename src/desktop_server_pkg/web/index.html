@@ -13,9 +13,8 @@ button,input{font:inherit;padding:6px 10px}input{width:4em}
 </head>
 <body>
 <h1>工创赛画面</h1>
-<img id="preview" alt="等待画面">
+<img id="preview" alt="无视频输入">
 <section>
-<button id="camera" hidden>使用电脑摄像头</button>
 <label>JPEG 质量 <input id="quality" type="number" min="25" max="90" value="65"></label>
 <label id="threshold" hidden>YOLO 置信度 <input id="confidence" type="number" min="0" max="1" step="0.01"></label>
 <button id="apply">应用</button>
@@ -24,78 +23,28 @@ button,input{font:inherit;padding:6px 10px}input{width:4em}
 <p id="status">连接中</p>
 <script>
 const preview = document.querySelector('#preview');
-const camera = document.querySelector('#camera');
 const quality = document.querySelector('#quality');
 const threshold = document.querySelector('#threshold');
 const confidence = document.querySelector('#confidence');
 const message = document.querySelector('#message');
 const status = document.querySelector('#status');
 const headers = {'X-Gongchuang-Client': 'web'};
-const video = document.createElement('video');
-const canvas = document.createElement('canvas');
-const context = canvas.getContext('2d');
-let stream, timer;
 let settingLoaded = false;
-let previewRetry;
-preview.onerror = () => {
-  clearTimeout(previewRetry);
-  previewRetry = setTimeout(() => { preview.src = '/video?t=' + Date.now(); }, 1500);
-};
-preview.src = '/video';
+preview.onerror = () => { preview.removeAttribute('src'); };
 async function refresh() {
   try {
     const reply = await fetch('/status', {cache: 'no-store'});
     if (!reply.ok) throw Error();
     const data = await reply.json();
-    camera.hidden = data.camera_source !== 'browser';
     if (!settingLoaded) { quality.value = data.jpeg_quality; settingLoaded = true; }
     const hasDetector = typeof data.confidence === 'number';
     if (hasDetector && threshold.hidden) confidence.value = data.confidence;
     threshold.hidden = !hasDetector;
-    status.textContent = '阶段：' + data.task.stage;
+    if (data.video_available && !preview.hasAttribute('src')) preview.src = '/video';
+    if (!data.video_available) preview.removeAttribute('src');
+    status.textContent = data.video_available ? '阶段：' + data.task.stage : '无视频输入';
   } catch { status.textContent = '服务已断开'; }
 }
-async function sendFrame() {
-  if (!stream) return;
-  const active = stream;
-  const start = performance.now();
-  try {
-    const ratio = Math.min(1, 1280 / video.videoWidth, 720 / video.videoHeight);
-    if (video.videoWidth) {
-      canvas.width = Math.round(video.videoWidth * ratio);
-      canvas.height = Math.round(video.videoHeight * ratio);
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const jpeg = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .8));
-      if (jpeg && stream === active) {
-        const response = await fetch('/camera', {method:'POST', headers, body:jpeg});
-        if (!response.ok && response.status !== 429) throw Error(response.status);
-      }
-    }
-  } catch { message.textContent = '摄像头画面上传失败'; }
-  if (stream === active) timer = setTimeout(sendFrame, Math.max(0, 100 - (performance.now() - start)));
-}
-function stopCamera() {
-  clearTimeout(timer);
-  if (stream) stream.getTracks().forEach(track => track.stop());
-  stream = undefined;
-  video.srcObject = null;
-  camera.textContent = '使用电脑摄像头';
-}
-camera.onclick = async () => {
-  if (stream) { stopCamera(); return; }
-  camera.disabled = true;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280}, height:{ideal:720}}, audio:false});
-    video.srcObject = stream;
-    await video.play();
-    camera.textContent = '停止电脑摄像头';
-    message.textContent = '';
-    sendFrame();
-  } catch (error) {
-    stopCamera();
-    message.textContent = '无法打开摄像头：' + error.message;
-  } finally { camera.disabled = false; }
-};
 document.querySelector('#apply').onclick = async () => {
   if (!quality.reportValidity() || (!threshold.hidden && !confidence.reportValidity())) return;
   const fields = new URLSearchParams({jpeg_quality:quality.value});
@@ -109,7 +58,6 @@ document.querySelector('#apply').onclick = async () => {
     message.textContent = '设置已应用';
   } catch { message.textContent = '设置失败'; }
 };
-window.addEventListener('pagehide', stopCamera);
 refresh();
 setInterval(refresh, 1000);
 </script>

@@ -7,16 +7,10 @@
   <license>Proprietary</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <depend>ament_index_cpp</depend>
-  <exec_depend>ament_index_python</exec_depend>
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
-  <depend>std_msgs</depend>
   <depend>libopencv-dev</depend>
-  <exec_depend>ros2launch</exec_depend>
-  <exec_depend>launch_ros</exec_depend>
-  <depend>vision_pkg</depend>
   <depend>rcl_interfaces</depend>
-  <depend>communication_pkg</depend>
-  <exec_depend>action_pkg</exec_depend>
+  <depend>robot_interfaces</depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>

@@ -1,11 +1,18 @@
+---
+date created: 2026-11-14  13：33
+date modified: 2026-11-14  20：56
+---
 # ROS 2 功能包
 
-| 包 | 职责 |
-| --- | --- |
-| `desktop_server_pkg` | HTTP 预览、状态和设置 |
-| `communication_pkg` | STM32 串口、协议和反馈 |
-| `vision_pkg` | C++ 采图和感知，Python YOLO |
-| `action_pkg` | 打散、GoTo、到位停车 |
+|功能包|构建方式|代码组织|
+|---|---|---|
+|`vision_pkg`|`ament_cmake`|`src/` 放 C++，`include/vision_pkg/` 放头文件，Python 节点和算法按混合包方式安装|
+|[`communication_pkg`](communication_pkg/README.md)|`ament_cmake`|`MyCMD` 提供动作方法，`SerialNode` 接 ROS 话题，`MyUART` 读写字节，`SimpleProtocol` 和 `ProtocolParser` 负责协议|
+|`action_pkg`|`ament_python`|`action_pkg/` 放 Python 代码，保留 `setup.py`|
+|`tests_pkg`|`ament_python`|`tests_pkg/` 放 Python 测试节点，保留 `setup.py`|
+|`desktop_server_pkg`|`ament_cmake`|C++ 服务端|
+|`robot_interfaces`|`ament_cmake`|`msg/`、`srv/`、`action/`|
+|`robot_launch`|`ament_cmake`|`config/`、`launch/`|
 
 ## 环境
 
@@ -17,14 +24,6 @@ sudo apt install ros-humble-ros-base ros-humble-rosidl-default-generators ros-hu
 bash tools/build.sh
 ```
 
-## 电脑
-
-`bash tools/run.sh` 后打开 [预览](http://localhost:18080)，点击「使用电脑摄像头」。手机 IP Webcam 用 `bash tools/run.sh source:=http camera_url:=http://手机IP:8080/video`。
-
-也可以用 [Windows Qt 客户端](../tools/laptop_server/README.md)连接。
-
-在 WSL 跑 YOLO 时，先执行 `python3 -m venv --system-site-packages tools/.venv` 和 `tools/.venv/bin/python -m pip install "numpy<2" onnxruntime`，然后给启动命令加 `model:=/绝对路径/best.onnx`。
-
 ## 香橙派
 
 用 `ssh pio` 或 `ssh pio-relay`，在 `~/my_ws/gongchuang_ros2` 拉取并编译。首次使用派上已有的 RKNNLite wheel 和模型：
@@ -32,9 +31,28 @@ bash tools/build.sh
 ```bash
 bash tools/setup_pi.sh ~/rknn-toolkit2/rknn-toolkit-lite2/packages/*cp310*.whl \
   ~/my_ws/gongchuang/my_project/assets/models/11_11/train5.rknn
-bash tools/run.sh source:=usb camera_device:=/dev/video0 model:="$PWD/tools/models/train5.rknn"
+bash tools/run.sh source:=usb camera_device:=/dev/video0 model:="$PWD/assets/models/train5.rknn"
 ```
 
-按 `v4l2-ctl --list-devices` 选择实际 USB 摄像头。Windows 用 `ssh -N -L 18080:127.0.0.1:18080 pio-relay` 转发（有线换 `pio`），再打开预览。
+编译后可在 Windows 客户端点「启动预览」，或在香橙派终端运行 `bash ~/my_ws/gongchuang_ros2/tools/preview.sh start`，从任意目录启动后台预览。调试时在仓库根目录运行 `bash tools/run.sh`，可直接看前台日志。默认自动找 USB 摄像头，必要时用 `camera_device:=/dev/videoN` 指定。未接相机显示「无视频输入」。预览默认只启动摄像头、视觉处理和 HTTP 节点。Windows 客户端从本机 SSH 配置读取连接别名，连接和队友密钥配置见[客户端说明](../tools/laptop_server/README.md)。
 
 实车联调在启动命令中加 `uart:=/dev/ttyS6`，用 `ros2 service call /task/start std_srvs/srv/Trigger '{}'` 开始，`/task/stop` 停止。
+
+模型权重放在仓库的 `assets/models/` 下。`model:=...` 会覆盖 `inference_node` 下的 `yolo.model_path`，两处都留空时只看原图。启动时使用绝对路径（例如 `model:="$PWD/assets/models/train5.rknn"`）。示例用 `$PWD` 从仓库根目录生成绝对路径。
+
+## 电脑仿真
+
+不接车时，Windows 上跑 `python tools/sim/stream.py` 把仿真画面推成 MJPEG，WSL 里用现成的 http 摄像头源读取：
+
+```bash
+bash tools/sim/run_sim.sh mode:=approach model:="$PWD/assets/models/train5.onnx"
+```
+
+仿真只提供画面，不发运动指令。没有下位机时，`tools/stm32_sim.py` 会用伪串口模拟 STM32。
+说明见[仿真接入](../tools/sim/README.md)。
+
+## 配置和单项测试
+
+日常参数在 [robot.yaml](robot_launch/config/robot.yaml)，原版留在 [project_config.yaml](../tools/legacy/project_config.yaml)。参见[单独验证靠近](tests_pkg/README.md)。
+
+视觉 ROS 入口在 `vision_pkg/scripts/`，算法在 `vision_pkg/modules/`。任务顺序在 `action_pkg/action_pkg/task_controller.py`。

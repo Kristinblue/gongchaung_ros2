@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>tests_pkg</name>
+  <version>0.1.0</version>
+  <description>Gongchuang single-item tests.</description>
+  <maintainer email="Kristinblue@users.noreply.github.com">Kristin</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend>
+  <depend>std_srvs</depend>
+  <depend>robot_interfaces</depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

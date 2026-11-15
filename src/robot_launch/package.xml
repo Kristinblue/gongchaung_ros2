@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>robot_launch</name>
+  <version>0.1.0</version>
+  <description>工创赛机器人启动入口与参数。</description>
+  <maintainer email="Kristinblue@users.noreply.github.com">Kristin</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+  <exec_depend>vision_pkg</exec_depend>
+  <exec_depend>communication_pkg</exec_depend>
+  <exec_depend>action_pkg</exec_depend>
+  <exec_depend>tests_pkg</exec_depend>
+  <exec_depend>desktop_server_pkg</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

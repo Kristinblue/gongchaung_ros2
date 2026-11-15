@@ -9,6 +9,7 @@
 #include <robot_interfaces/msg/feedback.hpp>
 #include <robot_interfaces/msg/state.hpp>
 #include <robot_interfaces/msg/serial_frame.hpp>
+#include <std_msgs/msg/u_int8_multi_array.hpp>
 
 using namespace std::chrono_literals;
 // 类型别名：后面的代码用短名字，读起来更接近协议文档。
@@ -46,6 +47,7 @@ public:
     feedback_ = create_publisher<Feedback>("robot/feedback", 10);
     // 原始字节帧给客户端串口页看：tx=true 是发出去的，false 是收到的。
     frames_ = create_publisher<SerialFrame>("robot/serial_frames", 100);
+    raw_rx_ = create_publisher<std_msgs::msg::UInt8MultiArray>("robot/serial_rx_raw", 100);
     // callback：收到 MyCMD 的命令，交给下面的 command_callback()。
     sub_ = create_subscription<Command>("robot/command", 10, [this, max_pitch_deg](const Command &message) {
       command_callback(message, max_pitch_deg);
@@ -156,6 +158,9 @@ private:
     const auto count = my_uart_.read(data, sizeof(data));
     if (count < 0) { disconnect(); return; }
     if (count == 0) return;
+    std_msgs::msg::UInt8MultiArray bytes;
+    bytes.data.assign(data, data + count);
+    raw_rx_->publish(bytes);
     parser_.feed(data, count);
     // while 循环把缓存里所有完整帧都取出来，一帧也不落下。
     while (auto packet = parser_.parse()) {
@@ -189,6 +194,7 @@ private:
   rclcpp::Publisher<State>::SharedPtr state_pub_;
   rclcpp::Publisher<Feedback>::SharedPtr feedback_;
   rclcpp::Publisher<SerialFrame>::SharedPtr frames_;
+  rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr raw_rx_;
   rclcpp::Subscription<Command>::SharedPtr sub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };

@@ -70,7 +70,7 @@ cmd> help
 cmd> quit
 ```
 
-`move_straight` 调用 `cmd.move_staight()`。前后和转向误差指令均在 0.4 秒后停车。`move_turn_a` 直接发送相对转角，正值向右，负值向左。模拟串口也能查看它的发送帧。
+`move_straight` 调用 `cmd.move_staight()`。每条输入发布一次对应命令。`move_turn_a` 直接发送相对转角，正值向右，负值向左。模拟串口也能查看它的发送帧。
 
 `angle_calib 90`（也可写 `set_angle 90`）调用 `MyCMD.angle_calib()`。`06` 的含义与参数定义待定，当前只在模拟串口打包。
 

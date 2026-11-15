@@ -10,15 +10,16 @@ fi
 export ROS_LOG_DIR="${ROS_LOG_DIR:-$PWD/tools/logs/ros}"
 if [[ ${1:-} == serial ]]; then
   export ROS_DOMAIN_ID=28 ROS_LOCALHOST_ONLY=1
+  namespace="/serial_test_$$"
   bridge_param=simulate:=true
   if [[ -n ${2:-} ]]; then
     bridge_param="uart.device:=$2"
   fi
   serial_prefix=$(ros2 pkg prefix communication_pkg)
-  "$serial_prefix/lib/communication_pkg/serial_node" --ros-args -p "$bridge_param" &
+  "$serial_prefix/lib/communication_pkg/serial_node" --ros-args -r "__ns:=$namespace" -p "$bridge_param" &
   serial_pid=$!
   trap 'kill "$serial_pid" 2>/dev/null || true; wait "$serial_pid" 2>/dev/null || true' EXIT
-  ros2 run tests_pkg serial_test_node
+  ros2 run tests_pkg serial_test_node --ros-args -r "__ns:=$namespace"
   exit
 fi
 launch=robot.launch.py

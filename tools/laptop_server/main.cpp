@@ -459,7 +459,7 @@ public:
     serialLayout->addLayout(serialFields);
     auto *serialTools = new QHBoxLayout;
     serialDirection_->addItems({"全部", "TX", "RX"});
-    serialCommand_->addItems({"全部", "01", "02", "03", "04", "05", "06"});
+    serialCommand_->addItems({"全部", "00", "01", "02", "03", "04", "05", "06", "07"});
     serialTools->addWidget(new QLabel("方向"));
     serialTools->addWidget(serialDirection_);
     serialTools->addWidget(new QLabel("命令"));
@@ -551,6 +551,7 @@ public:
         shellReady_ = true;
         updateControls();
       }
+      if (serialTest_ && !readTestFrames()) return;
       static const QByteArray marker = "\n__GC_DONE__";
       const int at = shellBuffer_.indexOf(marker);
       if (at < 0) {
@@ -572,6 +573,7 @@ public:
       shellBuffer_.remove(0, end + 1);
       if (!pending_) return;
       pending_ = false;
+      if (serialTest_) serialSeq_ = -1;
       serialTest_ = false;
       term_->setTestPrompt(false);
       if (!commandOutput.isEmpty()) term_->writeData(QString::fromUtf8(commandOutput));
@@ -734,6 +736,7 @@ private:
   }
 
   void showSerial(const QJsonObject &serial = {}) {
+    if (serialTest_) return;
     const bool connected = serial.value("connected").toBool();
     const bool simulated = serial.value("simulated").toBool();
     serialLabel_->setText(simulated ? "串口模拟 · 未接硬件" : connected ? "串口已连接" : "串口未连接");
@@ -764,6 +767,25 @@ private:
     renderSerial();
   }
 
+  // 帧记录通过 SSH 与命令输出一起到达，剥离后再解析 cmd> 提示符。
+  bool readTestFrames() {
+    bool changed = false;
+    int start = shellBuffer_.indexOf('\x1e');
+    while (start >= 0) {
+      const int end = shellBuffer_.indexOf('\n', start + 1);
+      if (end < 0) break;
+      serialLines_.append(QString::fromLatin1(shellBuffer_.mid(start + 1, end - start - 1)));
+      shellBuffer_.remove(start, end - start + 1);
+      changed = true;
+      start = shellBuffer_.indexOf('\x1e', start);
+    }
+    if (changed) {
+      while (serialLines_.size() > 300) serialLines_.removeFirst();
+      renderSerial();
+    }
+    return start < 0;
+  }
+
   void renderSerial() {
     const QString direction = serialDirection_->currentText();
     const QString command = serialCommand_->currentText();
@@ -775,12 +797,23 @@ private:
     }
     auto *scroll = serialFrames_->verticalScrollBar();
     const bool atEnd = scroll->value() == scroll->maximum();
-    serialFrames_->setPlainText(shown.join('\n'));
+    const auto previousPosition = scroll->value();
+    serialFrames_->clear();
+    QTextCursor cursor(serialFrames_->document());
+    for (const auto &line : shown) {
+      if (cursor.position() > 0) cursor.insertBlock();
+      QTextCharFormat format;
+      format.setForeground(QColor(line.startsWith("TX ") ? "#174ea6" :
+                                  line.startsWith("RX [RAW] ") ? "#8c4b17" : "#176746"));
+      cursor.insertText(line, format);
+    }
     if (atEnd) scroll->setValue(scroll->maximum());
+    else scroll->setValue(previousPosition);
   }
 
   // 帧格式：TX [SIM] AA 55 06 00 00 05，AA 55 后面第一个字节是命令位。
   static QString commandOf(const QString &line) {
+    if (line.startsWith("RX [RAW] ")) return {};
     const auto parts = line.split(' ', Qt::SkipEmptyParts);
     const int at = parts.indexOf("AA");
     return at >= 0 && at + 2 < parts.size() ? parts[at + 2] : QString();
@@ -881,6 +914,11 @@ private:
     term_->setFocus();
     term_->waitForOutput();
     serialTest_ = pending_ = true;
+    serialLines_.clear();
+    renderSerial();
+    serialLabel_->setText(device.isEmpty() ? "串口测试 · 模拟" : "串口测试 · " + device);
+    teamLabel_->setText("—");
+    angleLabel_->setText("—");
     stageLabel_->setText("阶段  serial_test_node");
     updateControls();
     // 结束标记与启动命令在同一行解析，避免测试节点把它读成第一条输入。
@@ -888,7 +926,7 @@ private:
       "test_ready() { [ -x \"$1/install/tests_pkg/lib/tests_pkg/serial_test_node\" ]; }; "
       "ws=\"$HOME/my_ws/gongchuang_ros2\"; "
       "if ! test_ready \"$ws\"; then ws=\"$HOME/.local/share/gongchuang_ros2_sync\"; fi; "
-      "if test_ready \"$ws\"; then bash \"$ws/tools/run.sh\" serial %1; "
+      "if test_ready \"$ws\"; then GONGCHUANG_SERIAL_FRAMES=1 bash \"$ws/tools/run.sh\" serial %1; "
       "else echo '请先在香橙派编译串口测试节点'; false; fi; "
       "printf '\\n__GC_DONE__%s\\n' $?\n").arg(device);
     shell_.write(command.toUtf8());

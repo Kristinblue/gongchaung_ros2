@@ -1,12 +1,17 @@
 """在终端调用 MyCMD 的动作接口，串口收发交给 serial_node。"""
 
+import os
+import sys
+import threading
 import time
 
 import rclpy
 from rclpy.duration import Duration
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
-from robot_interfaces.msg import Command
+from robot_interfaces.msg import Command, SerialFrame
+from std_msgs.msg import UInt8MultiArray
 
 from communication_pkg.my_cmd import MyCMD
 
@@ -26,6 +31,9 @@ class SerialTest(Node):
         super().__init__('serial_test_node')
         self.publisher = self.create_publisher(Command, 'robot/command', 10)
         self.cmd = MyCMD(self.publisher)
+        if os.environ.get('GONGCHUANG_SERIAL_FRAMES') == '1':
+            self.create_subscription(SerialFrame, 'robot/serial_frames', self.frame_callback, 100)
+            self.create_subscription(UInt8MultiArray, 'robot/serial_rx_raw', self.raw_rx_callback, 100)
         self.actions = {
             'move_straight': (self.cmd.move_staight, -32768, 32767),
             'move_staight': (self.cmd.move_staight, -32768, 32767),
@@ -44,7 +52,7 @@ class SerialTest(Node):
             if time.monotonic() >= deadline:
                 self.get_logger().error('[SerialTest] 串口节点未连接')
                 return 1
-            rclpy.spin_once(self, timeout_sec=0.1)
+            time.sleep(0.1)
 
         print(HELP)
         while True:
@@ -61,6 +69,19 @@ class SerialTest(Node):
             elif parts:
                 print('[SerialTest] 输入 help 查看命令和参数')
 
+    def frame_callback(self, frame):
+        """把串口桥实际记录的帧交给客户端串口页。"""
+        direction = 'TX' if frame.tx else 'RX'
+        mode = ' [SIM]' if frame.simulated else ''
+        self.write_frame(direction + mode, frame.data)
+
+    def raw_rx_callback(self, message):
+        self.write_frame('RX [RAW]', message.data)
+
+    def write_frame(self, label, data):
+        hex_bytes = bytes(data).hex(' ').upper()
+        os.write(sys.stdout.fileno(), f'\x1e{label} {hex_bytes}\n'.encode('ascii'))
+
     def run_action(self, name, argument):
         """把整数参数交给对应的 MyCMD 方法。"""
         action, low, high = self.actions[name]
@@ -75,14 +96,6 @@ class SerialTest(Node):
 
         if name == 'move_turn_a' and value == 0:
             print('[SerialTest] 相对转角为 0，无需旋转')
-            return
-        if name in ('move_straight', 'move_staight', 'move_turn'):
-            try:
-                action(value)
-                time.sleep(0.4)
-            finally:
-                self.stop()
-            print(f'[SerialTest] 已发布 {name} {value} 和停车指令')
             return
         action(value)
         self.publisher.wait_for_all_acked(Duration(seconds=0.5))
@@ -100,11 +113,17 @@ def main():
     # Ctrl+C 先触发 Python 的 finally，让前进测试能发出停车指令。
     rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
     node = SerialTest()
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    worker = threading.Thread(target=executor.spin)
+    worker.start()
     try:
         return node.run()
     except (EOFError, KeyboardInterrupt):
         print()
         return 0
     finally:
+        executor.shutdown()
+        worker.join()
         node.destroy_node()
         rclpy.try_shutdown()

@@ -1,3 +1,9 @@
+/*
+hyf
+直接移植之前的
+这里是协议应用层的说明
+*/
+
 #include "communication_pkg/my_ct_protocol.hpp"
 
 // 前 5 个字节相加，返回 uint8_t，只保留和的低 8 位。

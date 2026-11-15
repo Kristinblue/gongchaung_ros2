@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <fstream>
 #include <future>
 #include <optional>
@@ -14,6 +15,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <robot_interfaces/msg/match_state.hpp>
+#include <robot_interfaces/msg/feedback.hpp>
+#include <robot_interfaces/msg/serial_frame.hpp>
 #include <robot_interfaces/msg/state.hpp>
 #include <robot_interfaces/msg/objects.hpp>
 #include <rcl_interfaces/srv/get_parameters.hpp>
@@ -24,6 +27,8 @@ using namespace std::chrono_literals;
 using Image = sensor_msgs::msg::Image;
 using Objects = robot_interfaces::msg::Objects;
 using RobotState = robot_interfaces::msg::State;
+using Feedback = robot_interfaces::msg::Feedback;
+using SerialFrame = robot_interfaces::msg::SerialFrame;
 using MatchState = robot_interfaces::msg::MatchState;
 using ReadSettings = rcl_interfaces::srv::GetParameters;
 using WriteSettings = rcl_interfaces::srv::SetParametersAtomically;
@@ -35,6 +40,11 @@ public:
     const auto host = declare_parameter("host", "127.0.0.1");
     const int port = declare_parameter("port", 8080);
     const auto source = declare_parameter("camera_source", "usb");
+    const auto mode = declare_parameter("mode", "preview");
+    const bool serial_simulated = declare_parameter("serial_simulated", false);
+    // 靠近测试用的参考点，画在预览画面上，坐标以相机原图为准。
+    const auto point_x = declare_parameter("point.x0", 640.0);
+    const auto point_y = declare_parameter("point.y0", 550.0);
     if (source != "usb" && source != "http") throw std::invalid_argument("camera_source");
     const auto width = declare_parameter("preview_width", 640);
     const auto height = declare_parameter("preview_height", 360);
@@ -48,8 +58,29 @@ public:
     robot_ = create_subscription<RobotState>("robot/state", rclcpp::QoS(1).transient_local(),
       [this](const RobotState &state) {
         std::lock_guard lock(mutex_);
+        serial_state_ = state;
+        if (!state.connected) serial_feedback_.reset();
         camera_angle_ = state.camera_known ? std::optional<int>{state.camera_deg} : std::nullopt;
       });
+    // 只订阅已经解析好的回包，串口仍由通信节点独占。
+    feedback_ = create_subscription<Feedback>("robot/feedback", 10, [this](const Feedback &message) {
+      std::lock_guard lock(mutex_);
+      serial_feedback_ = message;
+    });
+    serial_frames_ = create_subscription<SerialFrame>("robot/serial_frames", 100, [this](const SerialFrame &frame) {
+      constexpr char hex[] = "0123456789ABCDEF";
+      std::string line = frame.tx ? "TX" : "RX";
+      if (frame.simulated) line += " [SIM]";
+      for (auto byte : frame.data) {
+        line += ' ';
+        line += hex[byte >> 4];
+        line += hex[byte & 15];
+      }
+      std::lock_guard lock(mutex_);
+      ++serial_seq_;
+      if (serial_lines_.size() == 100) serial_lines_.pop_front();
+      serial_lines_.push_back(std::move(line));
+    });
     target_ = create_subscription<Objects>("task/target", rclcpp::SensorDataQoS().keep_last(1),
       [this](Objects::ConstSharedPtr message) {
         std::lock_guard lock(mutex_);
@@ -82,13 +113,32 @@ public:
       response.set_content(std::string(std::istreambuf_iterator<char>(file), {}), "text/html; charset=utf-8");
     });
     // callback：客户端轮询 /status，读取当前任务阶段、视频是否可用、以及可调的设置。
-    server_.Get("/status", [this, source](const auto &, auto &response) {
+    server_.Get("/status", [this, source, mode, serial_simulated](const auto &, auto &response) {
       const auto confidence = read_confidence();
       std::lock_guard lock(mutex_);
       auto json = "{\"camera_source\":\"" + source + "\",\"jpeg_quality\":" +
         std::to_string(quality_.load()) + ",\"task\":{\"stage\":\"" + (stage_.empty() ? "preview" : stage_) +
         "\",\"frames\":" + std::to_string(frames_) + "}";
       json += video_available() ? ",\"video_available\":true" : ",\"video_available\":false";
+      const char *test = mode == "approach" ? "approach_test_node" : mode == "camera_test" ? "camera_test_node" : "";
+      json += ",\"test_node\":\"" + std::string(test) + "\",\"serial\":{\"connected\":" +
+        (serial_state_.connected ? "true" : "false");
+      if (serial_state_.team == "red" || serial_state_.team == "blue") {
+        json += ",\"team\":\"" + serial_state_.team + "\"";
+      }
+      if (serial_state_.angle_known) json += ",\"angle_deg\":" + std::to_string(serial_state_.angle_deg);
+      if (serial_state_.connected && serial_feedback_) {
+        json += ",\"code\":" + std::to_string(serial_feedback_->code) +
+          ",\"value\":" + std::to_string(serial_feedback_->value);
+      }
+      json += serial_simulated ? ",\"simulated\":true" : ",\"simulated\":false";
+      json += ",\"seq\":" + std::to_string(serial_seq_);
+      json += ",\"frames\":[";
+      for (const auto &line : serial_lines_) {
+        if (json.back() != '[') json += ',';
+        json += '"' + line + '"';
+      }
+      json += "]}";
       if (confidence) json += ",\"confidence\":" + std::to_string(*confidence);
       response.set_content(json + "}", "application/json");
     });
@@ -158,7 +208,7 @@ public:
     if (!server_.bind_to_port(host, port)) throw std::runtime_error("无法监听 HTTP 端口");
     // HTTP 接请求和图像压缩各跑各的，ROS 的 spin 在 main() 里继续接话题和参数服务回复。
     http_ = std::thread([this] { server_.listen_after_bind(); });
-    encode_ = std::thread([=] { encode_loop(width, height); });
+    encode_ = std::thread([=] { encode_loop(width, height, point_x, point_y); });
     RCLCPP_INFO(get_logger(), "[DesktopServer] http://%s:%d (%s)", host.c_str(), port, source.c_str());
   }
 
@@ -205,7 +255,7 @@ private:
   }
 
   // 每 100 ms 检查一次。先在锁内取出最新画面和状态，缩放、画框和压缩都放在锁外。
-  void encode_loop(int width, int height) {
+  void encode_loop(int width, int height, double point_x, double point_y) {
     Image::ConstSharedPtr last;
     int last_quality = 0;
     bool last_target = false;
@@ -238,6 +288,12 @@ private:
           cv::Mat small;
           const double scale = std::min({1.0, double(width) / frame.cols, double(height) / frame.rows});
           cv::resize(frame, small, {}, scale, scale, cv::INTER_AREA);
+          // 参考点按缩略后的比例画，靠近测试时用它对齐物块底边。
+          const cv::Point reference(cvRound(point_x * scale), cvRound(point_y * scale));
+          if (reference.x >= 0 && reference.y >= 0 && reference.x < small.cols && reference.y < small.rows) {
+            cv::drawMarker(small, reference, {80, 255, 80}, cv::MARKER_CROSS, 14, 2);
+            cv::circle(small, reference, 4, {80, 255, 80}, 1, cv::LINE_AA);
+          }
           std::string display_stage = stage == "search" ? "goto / S1 search" : stage;
           if (stage == "track") {
             display_stage = "goto / S2 track";
@@ -292,6 +348,12 @@ private:
   Objects::ConstSharedPtr selected_;
   rclcpp::Client<ReadSettings>::SharedPtr read_settings_;
   rclcpp::Client<WriteSettings>::SharedPtr write_settings_;
+  RobotState serial_state_;
+  uint64_t serial_seq_{0};
+  std::deque<std::string> serial_lines_;
+  rclcpp::Subscription<SerialFrame>::SharedPtr serial_frames_;
+  std::optional<Feedback> serial_feedback_;
+  rclcpp::Subscription<Feedback>::SharedPtr feedback_;
   rclcpp::Subscription<RobotState>::SharedPtr robot_;
   rclcpp::Subscription<Objects>::SharedPtr target_;
   rclcpp::Subscription<Image>::SharedPtr input_;

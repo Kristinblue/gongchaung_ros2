@@ -173,7 +173,7 @@ class GoTo:
         Args:
             objs: 当前检测列表，旧记忆项须标observed=False。
             now: 单调秒数，通常不传；电脑测试可传入仿真时钟。
-            turn_done: 本次旋转完成反馈，不传则读取cmd.turn_done。
+            turn_done: 本次旋转是否完成，不传则读取cmd.turn_done。
 
         Returns:
             True表示追踪成功且已停车；False表示本次任务仍在继续。
@@ -205,9 +205,11 @@ class GoTo:
                 if (now-self._step_at)*1000>=duration:
                     self._next_search(now)
             elif not self.search_turn_sent:
-                self.cmd.move_turn_a(180 if self.search_step in (0,2) else 360)
-                self.search_turn_sent = True
-                self._step_at = now
+                self.search_turn_sent = self.cmd.move_turn_a(180 if self.search_step in (0,2) else 360)
+                if self.search_turn_sent:
+                    self._step_at = now
+                else:
+                    self.note = '等待 STM32 上报导航角度'
             elif turn_done:
                 self._next_search(now)
             return False

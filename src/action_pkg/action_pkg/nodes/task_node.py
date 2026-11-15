@@ -42,7 +42,7 @@ class TaskNode(Node):
         self.status = self.create_publisher(String, 'task/state', state_qos)
         self.match_status = self.create_publisher(MatchState, 'match/state', state_qos)
         self.target = self.create_publisher(Objects, 'task/target', frames_qos)
-        # 话题 callback：串口状态交给 robot_state，转向回包交给 MyCMD，新检测帧交给 on_frame。
+        # 话题 callback：串口状态交给 robot_state，角度回包交给 MyCMD，新检测帧交给 on_frame。
         self.create_subscription(State, 'robot/state', self.robot_state, state_qos)
         self.create_subscription(Feedback, 'robot/feedback', self.cmd.read_feedback, 10)
         self.create_subscription(Objects, 'vision/objects', self.on_frame, frames_qos)
@@ -60,6 +60,8 @@ class TaskNode(Node):
         self.connected = message.connected
         self.task.team = message.team or None
         self.task.go_to.team = self.task.team
+        if not self.connected:
+            self.cmd.angle = None
         if not self.connected and self.task.state != STOP:
             self.task.stop()
             self.publish_status()
@@ -134,14 +136,12 @@ class TaskNode(Node):
         return response
 
     def watchdog(self):
-        """半秒没有新检测帧就停车，否则给串口节点发心跳。"""
+        """半秒没有新检测帧就停车。"""
         if self.task.state == STOP:
             return
         if time.monotonic() - self.last_frame > .5:
             self.task.stop()
             self.publish_status()
-        else:
-            self.cmd.heartbeat()
 
 
 def run_node(node_class):

@@ -6,18 +6,22 @@ static uint8_t checksum(const uint8_t *data) {
 }
 
 SimpleProtocol::Frame SimpleProtocol::pack(uint8_t code, int16_t value) {
+  // 先转成无符号，右移时才是逻辑移位，不会把符号位带进来。
   const uint16_t raw = static_cast<uint16_t>(value);
+  // 0xAA 0x55 是固定的两个帧头；code 是命令位；value 低字节在前。
   Frame frame{0xaa, 0x55, code, uint8_t(raw), uint8_t(raw >> 8), 0};
   frame.back() = checksum(frame.data());
   return frame;
 }
 
 std::optional<SimpleProtocol::Message> SimpleProtocol::unpack(const uint8_t *data, std::size_t size) {
+  // 三个检查缺一不可：长度必须是 6、两个帧头必须对、校验必须对。
   if (size != Frame{}.size() || data[0] != 0xaa || data[1] != 0x55 || data[5] != checksum(data)) {
     return std::nullopt;
   }
   // 高字节左移 8 位再和低字节合并，还原协议里的有符号数。
   const int raw = data[3] | (data[4] << 8);
+  // raw 现在在 0~65535，大于等于 32768 的其实是负数补码，减 65536 还原。
   return Message{data[2], static_cast<int16_t>(raw < 32768 ? raw : raw - 65536)};
 }
 
@@ -28,12 +32,15 @@ void ProtocolParser::feed(const uint8_t *data, std::size_t size) {
 
 std::optional<SimpleProtocol::Message> ProtocolParser::parse() {
   constexpr auto frame_size = SimpleProtocol::Frame{}.size();
+  // 只有缓存里够 6 个字节才可能有一整帧。
   while (input_.size() >= frame_size) {
     if (auto message = SimpleProtocol::unpack(input_.data(), frame_size)) {
+      // 解析成功：从缓存里删掉这 6 个字节，把消息返回给调用方。
       input_.erase(input_.begin(), input_.begin() + frame_size);
       return message;
     }
     // 帧头或校验对不上，就往后挪一个字节继续找。
+    // 不能一次丢 6 个字节，因为真正的帧头可能就在这 6 个字节中间。
     input_.erase(input_.begin());
   }
   return std::nullopt;

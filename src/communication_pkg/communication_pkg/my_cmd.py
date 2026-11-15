@@ -8,8 +8,19 @@
 ROS 版的 MyCMD 发话题，由 SerialNode 调用 MyUART。
 """
 
+# 分层说明：
+#   MyCMD（本文件）只负责“要做什么动作”，把动作翻译成命令位和数值，
+#   通过 /robot/command 话题发出去；真正的 6 字节打包、串口读写、
+#   看门狗都在 C++ 的 serial_node 里。这样改动作逻辑不用碰串口，
+#   改协议也不用碰任务代码。
+#
+#   动作命令（发）：01 前进/后退  02 转向  03 夹爪  04 相机俯角
+#                  05 相对旋转  06 绝对角度校准  07 停车  00 查询队伍
+#   回包（收）：  00 队伍确认  01 绝对角度
+
 # 相机端发送的命令位对应
 # 动作与命令位的对应
+GET_FLAG = b'\x00' #确认红蓝方，0为红方，1为蓝方
 STRAIGHT = b'\x01' # 正数后退，负数往前
 TURN = b'\x02' # 正右负做
 
@@ -22,16 +33,16 @@ CAM_ANGLE = b'\x04'
 
 #角度旋转
 TURN_ANGLE = b'\x05' # 以当前方向为基准，正数为右转角度，顺时针，负数左转
-STOP = b'\x06'
+ANGLE_CALIB = b'\x06' # 绝对角度校准，利用安全区的，之后具体规定
+STOP = b'\x07'
 
 # 接收的命令对应
-FLAG = b'\x01' #确认红蓝方，0为红方，1为蓝方
-ANGLE = b'\x02' #得到绝对的角度，初始朝向必须准，暂且假设红色指向蓝色的为0度，逆时针增大，0-360度
-TURN_DONE = b'\x05'  # 接收数据1：本次相对旋转完成。
-#初版代码里面陀螺仪的角度信息我们暂时先不用
+FLAG = b'\x00' #确认红蓝方，0为红方，1为蓝方
+ANGLE = b'\x01' #得到绝对的角度，初始朝向必须准，暂且假设红色指向蓝色的为0度，逆时针增大，0-360度
+# 需要
 
 
-from robot_interfaces.msg import Command
+from robot_interfaces.msg import Command, Feedback
 
 
 class MyCMD:
@@ -39,10 +50,16 @@ class MyCMD:
 
     def __init__(self, publisher):
         self.publisher = publisher
+        # 相对旋转是否完成，由 read_feedback() 按连续角度回包判断。
         self.turn_done = False
+        self.angle = None
+        self._turn_angle = 0
+        self._turned = 0
 
     def _send(self, cmd, value):
         """在 ROS 话题上发送动作命令，由串口节点按原协议打包。"""
+        # cmd 是单字节 bytes（如 b'\x01'），cmd[0] 取出的就是整数 1。
+        # 协议里 value 是 int16，先夹到 -32768~32767，避免越界。
         self.publisher.publish(Command(code=cmd[0], value=max(-32768,min(32767,int(value)))))
 
     def move_staight(self, speed:int):
@@ -50,41 +67,57 @@ class MyCMD:
         由像素决定，以及PID的参数
         不是严格的speed！！！！！
         """
+        # speed 是像素误差，不是 m/s；实际速度由 STM32 的 PID 决定。
         self._send(STRAIGHT, speed)
 
     def move_turn(self, speed:int):
         """转向，正右负左"""
+        # 和前进一样，单位是像素误差，正右负左。
         self._send(TURN, speed)
 
     def move_turn_a(self,angle:int):
-        """
-        带角度的旋转
-        """
-        self.turn_done = False
-        self._send(TURN_ANGLE,angle)
+        """有起始角度才发送相对转向，返回是否已接受请求。"""
+        if self.angle is None:
+            return False
+        self._turn_angle = max(-32768, min(32767, int(angle)))
+        self._turned = 0
+        self.turn_done = self._turn_angle == 0
+        if self._turn_angle:
+            self._send(TURN_ANGLE, self._turn_angle)
+        return True
 
     def read_feedback(self, feedback):
-        """消费一次串口反馈，记录相对转角完成。"""
-        if feedback.code == TURN_DONE[0] and feedback.value == 1:
-            self.turn_done = True
-
-    def heartbeat(self):
-        """维持通信节点的动作看门狗，不向下位机发送新动作。"""
-        self._send(b'\x00', 0)
+        """收到 01 角度后，累计本次实际转过的角度。"""
+        if feedback.code != Feedback.ANGLE or not 0 <= feedback.value <= 360:
+            return
+        angle = feedback.value % 360
+        if self._turn_angle:
+            # 例如从 2° 顺时针转到 358°，差值是 -4°。命令正数表示顺时针。
+            delta = (angle - self.angle + 180) % 360 - 180
+            self._turned += -delta if self._turn_angle > 0 else delta
+            if self._turned > 0 and self._turned >= abs(self._turn_angle) - 1:
+                self.turn_done = True
+                self._turn_angle = 0
+        self.angle = angle
 
     def move_stop(self):
-        """06停车，并清除旧的前进和转向误差，不改变夹爪。"""
+        """07停车，并清除旧的前进和转向误差，不改变夹爪。"""
+        # 停车同时清掉 turn_done，避免旧的“转完了”状态影响下一次动作。
         self.turn_done = False
+        self._turn_angle = 0
         self._send(STOP, 0)
 
     def grab(self, angle:int):
         """夹爪，0为开，1为关"""
+        # 当前协议只有开/关两个值，抓取角度后面再补。
         self._send(GRAB, angle)
 
     def camera(self, angle:int):
         """相机俯角，单位度；0水平，向下为正。"""
+        # 0~80 度，serial_node 还会按 max_pitch_deg 再检查一次。
         self._send(CAM_ANGLE, angle)
 
     def close(self):
         """停车。串口由通信节点负责关闭。"""
+        # 这里只发停车，不关串口；串口的生命周期归 serial_node。
         self.move_stop()

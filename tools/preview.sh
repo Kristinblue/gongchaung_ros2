@@ -7,17 +7,45 @@ cd "$(dirname "$script")/.."
 unit=gongchuang-preview
 
 case "${1:-start}" in
+  ensure-preview)
+    if systemctl --user is-active --quiet "$unit.service"; then exit 0; fi
+    exec bash "$script" start preview
+    ;;
   start)
-    if systemctl --user is-active --quiet "$unit.service"; then
-      echo "预览已经启动"
-      exit 0
-    fi
     if [[ ! -f install/local_setup.bash ]]; then
       echo "请先运行 bash "$PWD/tools/build.sh"" >&2
       exit 1
     fi
-    systemd-run --user --unit="$unit" --collect --working-directory="$PWD" \
-      /bin/bash "$PWD/tools/run.sh" source:=usb mode:=preview
+    mode=${2:-preview}
+    args=(source:=usb "mode:=$mode" camera_fps:=10 camera_fourcc:=YUYV)
+    ros_domain=${ROS_DOMAIN_ID:-0}
+    case "$mode" in
+      preview|camera_test) ;;
+      approach)
+        model="$PWD/assets/models/train5.rknn"
+        if [[ ! -r "$model" ]]; then
+          echo "靠近测试需要模型 $model" >&2
+          exit 1
+        fi
+        args+=("model:=$model" simulate_uart:=true)
+        ros_domain=27
+        ;;
+      *) echo "未知启动模式: $mode" >&2; exit 2 ;;
+    esac
+
+    description="Gongchuang $mode"
+    if systemctl --user is-active --quiet "$unit.service"; then
+      if [[ $(systemctl --user show "$unit.service" -p Description --value) == "$description" ]]; then
+        echo "$mode 已在运行"
+        exit 0
+      fi
+      systemctl --user stop "$unit.service"
+    fi
+    systemd-run --user --unit="$unit" --collect --description="$description" \
+      --working-directory="$PWD" --setenv=OPENCV_VIDEOIO_V4L_SELECT_TIMEOUT=2 \
+      --setenv=ROS_DOMAIN_ID="$ros_domain" \
+      --setenv=FASTRTPS_DEFAULT_PROFILES_FILE="$PWD/tools/preview_fastdds.xml" \
+      /bin/bash "$PWD/tools/run.sh" "${args[@]}"
     ;;
   stop)
     systemctl --user stop "$unit.service"
@@ -26,7 +54,7 @@ case "${1:-start}" in
     systemctl --user status "$unit.service" --no-pager
     ;;
   *)
-    echo "用法: bash $script [start|stop|status]" >&2
+    echo "用法: bash $script [start [preview|approach|camera_test]|ensure-preview|stop|status]" >&2
     exit 2
     ;;
 esac

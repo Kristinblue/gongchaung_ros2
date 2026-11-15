@@ -13,7 +13,7 @@ import socket
 import time
 
 START = b'\xaa\x55'
-CODES = {1: '前进', 2: '转向', 3: '夹爪', 4: '相机', 5: '相对转角', 6: '停车'}
+CODES = {0: '查询队伍', 1: '前进', 2: '转向', 3: '夹爪', 4: '相机', 5: '相对转角', 6: '角度校准（保留）', 7: '停车'}
 
 
 def checksum(frame):
@@ -45,7 +45,7 @@ class Sim:
         self.speed = self.turn = 0.0
         self.gripper = 0
         self.camera = 0
-        self.turn_done_at = None
+        self.turn_target = None
         self.received = 0
         self.last_report = 0.0
 
@@ -55,6 +55,7 @@ class Sim:
             self.speed = 0.0 if abs(value) <= self.speed_deadband else max(
                 -self.speed_limit, min(self.speed_limit, -value * self.speed_gain))
         elif code == 2:
+            self.turn_target = None
             self.turn = 0.0 if abs(value) <= self.turn_deadband else max(
                 -self.turn_limit, min(self.turn_limit, -value * self.turn_gain))
         elif code == 3:
@@ -63,15 +64,21 @@ class Sim:
             self.camera = max(0, min(80, value))
         elif code == 5:
             self.speed = 0.0
-            self.turn = 0.6 if value > 0 else -0.6
-            self.turn_done_at = time.monotonic() + min(3.0, max(0.2, abs(value) / 45))
-        elif code == 6:
+            self.turn_target = self.yaw - math.radians(value)
+            self.turn = math.copysign(0.6, -value) if value else 0.0
+        elif code == 7:
             self.speed = self.turn = 0.0
-            self.turn_done_at = None
+            self.turn_target = None
         print(f'[Stm32Sim] {CODES.get(code, "未知")}({code:02d}) = {value}', flush=True)
 
     def step(self, dt):
-        self.yaw += self.turn * dt
+        delta = self.turn * dt
+        if self.turn_target is not None and abs(delta) >= abs(self.turn_target - self.yaw):
+            self.yaw = self.turn_target
+            self.turn = 0.0
+            self.turn_target = None
+        else:
+            self.yaw += delta
         self.x += self.speed * math.cos(self.yaw) * dt
         self.y += self.speed * math.sin(self.yaw) * dt
 
@@ -112,7 +119,7 @@ class Link:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--team', choices=('red', 'blue'), default='red', help='上电回的队伍')
+    parser.add_argument('--team', choices=('red', 'blue'), default='red', help='收到启动查询后回的队伍')
     parser.add_argument('--sim-host', default='', help='仿真控制地址，如 WSL 的 172.27.176.1 或派上的 192.168.60.1')
     parser.add_argument('--sim-port', type=int, default=8091, help='仿真控制端口')
     parser.add_argument('--speed-gain', type=float, default=0.00015, help='前进像素误差→m/s')
@@ -140,6 +147,7 @@ def main():
     greeted = False
     last = time.monotonic()
     last_forward = 0.0
+    last_angle = 0.0
     try:
         while True:
             ready, _, _ = select.select([master], [], [], 0.05)
@@ -150,14 +158,11 @@ def main():
                 try:
                     data = os.read(master, 256)
                 except OSError:
-                    # 串口节点关掉了，等它重开再补发队伍帧
+                    # 串口节点关掉了，重开后等待下一次队伍查询。
                     greeted = False
+                    buffer.clear()
                     time.sleep(0.05)
                     continue
-                if data and not greeted:
-                    # 串口节点靠这条 01 反馈填 robot/state.team
-                    os.write(master, pack(1, 0 if args.team == 'red' else 1))
-                    greeted = True
                 buffer.extend(data)
             while len(buffer) >= 6:
                 if buffer[:2] != START or buffer[5] != checksum(buffer):
@@ -166,7 +171,13 @@ def main():
                 code = buffer[2]
                 raw = buffer[3] | (buffer[4] << 8)
                 value = raw - 65536 if raw >= 32768 else raw
-                sim.handle(code, value)
+                if code == 0 and value == 0:
+                    # 查询队伍后，开始连续上报角度。
+                    os.write(master, pack(0, 0 if args.team == 'red' else 1))
+                    greeted = True
+                    last_angle = 0.0
+                else:
+                    sim.handle(code, value)
                 if link is not None:
                     if code == 4:
                         link.send(f'C {sim.camera}')
@@ -176,11 +187,9 @@ def main():
             if link is not None and now - last_forward > 0.1:
                 last_forward = now
                 link.send(f'D {sim.speed:.4f} {sim.turn:.4f}')
-            if sim.turn_done_at is not None and now >= sim.turn_done_at:
-                sim.turn_done_at = None
-                sim.turn = 0.0
-                os.write(master, pack(5, 1))
-                print('[Stm32Sim] 相对转角完成，回 05=1', flush=True)
+            if greeted and now - last_angle >= 0.05:
+                os.write(master, pack(1, round(math.degrees(sim.yaw)) % 360))
+                last_angle = now
             if now - sim.last_report > 1.0:
                 sim.last_report = now
                 print(sim.report(), flush=True)

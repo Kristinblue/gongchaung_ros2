@@ -3,17 +3,22 @@
 #include <QColor>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFontDatabase>
+#include <QFormLayout>
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHostAddress>
 #include <QImage>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QMenu>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
 #include <QNetworkReply>
@@ -25,13 +30,16 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScreen>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QTcpServer>
 #include <QTextCharFormat>
+#include <QTabWidget>
 #include <QTimer>
+#include <QToolButton>
 #include <QTextCursor>
 #include <QToolTip>
 #include <QUrlQuery>
@@ -48,7 +56,7 @@ public:
   explicit Terminal(QWidget *parent = nullptr) : QPlainTextEdit(parent) {
     setReadOnly(true);
     setFrameShape(QFrame::NoFrame);
-    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setFocusPolicy(Qt::StrongFocus);
     setCursorWidth(2);
     base_ = QTextCharFormat();
@@ -71,7 +79,7 @@ public:
   void showNotice(const QString &text) {
     reset();
     QTextCharFormat format;
-    format.setForeground(QColor("#6b7480"));
+    format.setForeground(QColor("#c5cfdd"));
     writeText(text, format);
   }
   void showPrompt() {
@@ -303,6 +311,16 @@ public:
     connection->addWidget(caption);
     connection->addWidget(mode_, 0);
     connection->addWidget(connect_);
+    auto *tests = new QMenu(previewStart_);
+    tests->addAction("运行靠近测试 · approach_test_node", this, [this] { runPreview("start approach"); });
+    tests->addAction("运行摄像头测试 · camera_test_node", this, [this] { runPreview("start camera_test"); });
+    tests->addSeparator();
+    tests->addAction("结束测试", this, [this] { runPreview("start preview"); });
+    previewStart_->setObjectName("testMenu");
+    previewStart_->setText("测试节点  ▼");
+    tests->setObjectName("testChoices");
+    previewStart_->setMenu(tests);
+    previewStart_->setPopupMode(QToolButton::InstantPopup);
     connection->addWidget(previewStart_);
     connection->addSpacing(6);
     connection->addWidget(status_, 1);
@@ -320,7 +338,10 @@ public:
     image_->setAlignment(Qt::AlignCenter);
     image_->setMinimumSize(220, 124);
     image_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
-    image_->setStyleSheet("background:#fbfcfe;border:1px solid #eef1f6;border-radius:10px;color:#98a1ae;");
+    image_->setStyleSheet("background:#fbfcfe;border:1px solid #eef1f6;border-radius:10px;color:#45546a;font-size:16px;");
+    stageLabel_->setObjectName("stage");
+    stageLabel_->setWordWrap(true);
+    preview->addWidget(stageLabel_);
     preview->addWidget(image_, 1);
     auto *settings = new QHBoxLayout;
     settings->setSpacing(8);
@@ -352,7 +373,50 @@ public:
     terminal->addWidget(term_, 1);
 
     split->addWidget(left);
-    split->addWidget(right);
+    auto *rightTabs = new QTabWidget;
+    rightTabs->setObjectName("rightTabs");
+    rightTabs->addTab(right, "终端");
+    auto *serialPage = new QWidget;
+    serialPage->setObjectName("serialPage");
+    auto *serialLayout = new QVBoxLayout(serialPage);
+    serialLayout->setContentsMargins(14, 14, 14, 14);
+    serialLabel_->setObjectName("serialStatus");
+    serialLayout->addWidget(serialLabel_);
+    auto *serialFields = new QFormLayout;
+    serialFields->setHorizontalSpacing(14);
+    serialFields->setVerticalSpacing(8);
+    serialFields->addRow("队伍", teamLabel_);
+    serialFields->addRow("导航角度", angleLabel_);
+    for (auto *label : {teamLabel_, angleLabel_}) {
+      label->setObjectName("serialValue");
+      label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+      label->setWordWrap(true);
+    }
+    serialLayout->addLayout(serialFields);
+    auto *serialTools = new QHBoxLayout;
+    serialDirection_->addItems({"全部", "TX", "RX"});
+    serialCommand_->addItems({"全部", "01", "02", "03", "04", "05", "06"});
+    serialTools->addWidget(new QLabel("方向"));
+    serialTools->addWidget(serialDirection_);
+    serialTools->addWidget(new QLabel("命令"));
+    serialTools->addWidget(serialCommand_);
+    serialTools->addStretch(1);
+    serialTools->addWidget(serialClear_);
+    serialLayout->addLayout(serialTools);
+    connect(serialDirection_, &QComboBox::currentTextChanged, this, [this] { renderSerial(); });
+    connect(serialCommand_, &QComboBox::currentTextChanged, this, [this] { renderSerial(); });
+    connect(serialClear_, &QPushButton::clicked, this, [this] {
+      // 只清显示和本地缓存；seq 保留，所以旧帧不会在下一次轮询又冒出来。
+      serialLines_.clear();
+      serialFrames_->clear();
+    });
+    serialFrames_->setReadOnly(true);
+    serialFrames_->setLineWrapMode(QPlainTextEdit::NoWrap);
+    serialFrames_->setObjectName("serialFrames");
+    serialFrames_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    serialLayout->addWidget(serialFrames_, 1);
+    rightTabs->addTab(serialPage, "串口");
+    split->addWidget(rightTabs);
     split->setStretchFactor(0, 3);
     split->setStretchFactor(1, 2);
     split->setSizes({360, 220});
@@ -367,12 +431,6 @@ public:
     connect(connect_, &QPushButton::clicked, this, [this] {
       if (active_) disconnectServer();
       else connectServer();
-    });
-    connect(previewStart_, &QPushButton::clicked, this, [this] {
-      execute(QStringLiteral(
-        "if [ -x \"$HOME/.local/bin/gongchuang-preview\" ]; then "
-        "bash \"$HOME/.local/bin/gongchuang-preview\" start; "
-        "else bash \"$HOME/my_ws/gongchuang_ros2/tools/preview.sh\" start; fi"));
     });
     connect(&poll_, &QTimer::timeout, this, [this] { poll(); });
     connect(apply_, &QPushButton::clicked, this, [this] { apply(); });
@@ -414,7 +472,9 @@ public:
     });
     // callback：SSH 有输出就读取。命令结束标记可能分几次到达，所以先攒到 shellBuffer_。
     connect(&shell_, &QProcess::readyRead, this, [this] {
-      shellBuffer_ += shell_.readAll();
+      const auto output = shell_.readAll();
+      logTerminal(output);
+      shellBuffer_ += output;
       if (!shellReady_) {
         const QByteArray ready = "\n__GC_READY__";
         const int at = shellBuffer_.indexOf(ready);
@@ -430,11 +490,11 @@ public:
       if (at < 0) return;
       const int end = shellBuffer_.indexOf('\n', at + marker.size());
       if (end < 0) return;
-      const auto output = shellBuffer_.left(at);
+      const auto commandOutput = shellBuffer_.left(at);
       shellBuffer_.remove(0, end + 1);
       if (!pending_) return;
       pending_ = false;
-      if (!output.isEmpty()) term_->writeData(QString::fromUtf8(output));
+      if (!commandOutput.isEmpty()) term_->writeData(QString::fromUtf8(commandOutput));
       term_->finish();
       updateControls();
     });
@@ -466,7 +526,7 @@ private:
   void updateControls() {
     mode_->setEnabled(!active_);
     connect_->setText(active_ ? "断开" : "连接");
-    previewStart_->setEnabled(active_ && shellReady_ && !pending_ && !online_);
+    previewStart_->setEnabled(shellReady_ && !pending_);
     quality_->setEnabled(online_);
     confidence_->setEnabled(online_ && hasDetector_);
     apply_->setEnabled(online_ && !setting_);
@@ -491,7 +551,17 @@ private:
     localPort_ = local.serverPort();
     local.close();
     target_ = mode_->currentText();
+    previewRequested_ = false;
     sshError_.clear();
+    // 只保留最近一条连接的终端记录。收到输出就写入，排查时可以直接读取。
+    const auto logDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    terminalLog_.close();
+    if (!logDir.isEmpty() && QDir().mkpath(logDir)) {
+      terminalLog_.setFileName(logDir + "/ssh-terminal.log");
+      if (terminalLog_.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        logTerminal(("SSH " + target_ + "\n").toUtf8());
+      }
+    }
 
     QSettings saved;
     saved.setValue("connection/alias", target_);
@@ -512,7 +582,7 @@ private:
   }
 
   void disconnectServer(const QString &message = "未连接") {
-    active_ = online_ = hasDetector_ = false;
+    active_ = online_ = hasDetector_ = videoAvailable_ = false;
     poll_.stop();
     for (const auto &reply : {video_, statusReply_, setting_})
       if (reply) reply->abort();
@@ -522,6 +592,9 @@ private:
     pending_ = false;
     shellBuffer_.clear();
     shellReady_ = false;
+    serialLines_.clear();
+    serialSeq_ = -1;
+    serialFrames_->clear();
     frame_ = {};
     buffer_.clear();
     image_->setPixmap(QPixmap());
@@ -529,6 +602,8 @@ private:
     term_->setPrompt("$");
     term_->showNotice("未连接");
     status_->setText(message);
+    stageLabel_->setText("阶段  —");
+    showSerial();
     updateControls();
   }
 
@@ -545,9 +620,13 @@ private:
       reply->deleteLater();
       if (!active_) return;
       if (reply->error() != QNetworkReply::NoError || !data.contains("jpeg_quality")) {
-        online_ = false;
-        status_->setText(shellReady_ ? "等待画面服务，可点击「启动预览」" : "正在连接香橙派");
+        online_ = videoAvailable_ = false;
+        status_->setText(shellReady_ ? "等待画面服务" : "正在连接香橙派");
+        stageLabel_->setText("阶段  —");
+        showSerial();
+        if (shellReady_ && !pending_ && !previewRequested_) runPreview("ensure-preview");
         if (video_) video_->abort();
+        clearVideo();
       } else {
         if (!online_) quality_->setValue(data.value("jpeg_quality").toInt());
         const auto confidence = data.value("confidence");
@@ -555,9 +634,12 @@ private:
         hasDetector_ = confidence.isDouble();
         online_ = true;
         const auto stage = data.value("task").toObject().value("stage").toString("preview");
-        const bool available = data.value("video_available").toBool();
-        status_->setText("已连接 · 阶段：" + stage);
-        if (available) {
+        const auto testNode = data.value("test_node").toString();
+        stageLabel_->setText("阶段  " + (testNode.isEmpty() ? stage : testNode));
+        showSerial(data.value("serial").toObject());
+        videoAvailable_ = data.value("video_available").toBool();
+        status_->setText(videoAvailable_ ? "已连接" : "已连接 · 最近 2 秒未收到新画面");
+        if (videoAvailable_) {
           if (!video_) startVideo();
         } else {
           if (video_) video_->abort();
@@ -566,6 +648,59 @@ private:
       }
       updateControls();
     });
+  }
+
+  void showSerial(const QJsonObject &serial = {}) {
+    const bool connected = serial.value("connected").toBool();
+    const bool simulated = serial.value("simulated").toBool();
+    serialLabel_->setText(simulated ? "串口模拟 · 未接硬件" : connected ? "串口已连接" : "串口未连接");
+    const auto team = serial.value("team").toString();
+    teamLabel_->setText(connected && !team.isEmpty() ? (team == "red" ? "红方" : "蓝方") : "—");
+    angleLabel_->setText(connected && serial.contains("angle_deg")
+      ? QString::number(serial.value("angle_deg").toInt()) + "°" : "—");
+    QStringList frames;
+    for (const auto &frame : serial.value("frames").toArray()) frames.append(frame.toString());
+    const qint64 seq = serial.value("seq").toInteger(-1);
+    if (frames.isEmpty()) {
+      serialSeq_ = -1;
+      if (!serialLines_.isEmpty()) {
+        serialLines_.clear();
+        serialFrames_->clear();
+      }
+      return;
+    }
+    if (serialSeq_ >= 0 && seq >= serialSeq_) {
+      // seq 是服务端累计帧数，两次轮询之间新来的帧一定在列表末尾。
+      const int fresh = static_cast<int>(qMin<qint64>(seq - serialSeq_, frames.size()));
+      serialLines_ += frames.mid(frames.size() - fresh);
+    } else {
+      serialLines_ = frames;
+    }
+    serialSeq_ = seq;
+    while (serialLines_.size() > 300) serialLines_.removeFirst();
+    renderSerial();
+  }
+
+  void renderSerial() {
+    const QString direction = serialDirection_->currentText();
+    const QString command = serialCommand_->currentText();
+    QStringList shown;
+    for (const auto &line : serialLines_) {
+      if (direction != "全部" && !line.startsWith(direction + " ")) continue;
+      if (command != "全部" && commandOf(line) != command) continue;
+      shown.append(line);
+    }
+    auto *scroll = serialFrames_->verticalScrollBar();
+    const bool atEnd = scroll->value() == scroll->maximum();
+    serialFrames_->setPlainText(shown.join('\n'));
+    if (atEnd) scroll->setValue(scroll->maximum());
+  }
+
+  // 帧格式：TX [SIM] AA 55 06 00 00 05，AA 55 后面第一个字节是命令位。
+  static QString commandOf(const QString &line) {
+    const auto parts = line.split(' ', Qt::SkipEmptyParts);
+    const int at = parts.indexOf("AA");
+    return at >= 0 && at + 2 < parts.size() ? parts[at + 2] : QString();
   }
 
   void startVideo() {
@@ -636,7 +771,7 @@ private:
 
   // 远端执行完会输出 __GC_DONE__ 和退出码，收到标记后才允许输入下一条命令。
   void execute(const QString &text) {
-    if (text.trimmed().isEmpty() || !active_ || shell_.state() != QProcess::Running || pending_) {
+    if (text.trimmed().isEmpty() || !active_ || !shellReady_ || shell_.state() != QProcess::Running || pending_) {
       term_->finish();
       return;
     }
@@ -644,14 +779,31 @@ private:
     if (QRegularExpression("^ls(\\s|$)").match(text).hasMatch() && !text.contains("--color"))
       remote.replace(0, 2, "ls --color=always");
     pending_ = true;
+    logTerminal(("$ " + text + "\n").toUtf8());
     updateControls();
     shell_.write((remote + "\nprintf '\\n__GC_DONE__%s\\n' $?\n").toUtf8());
+  }
+
+  void runPreview(const QString &action) {
+    previewRequested_ = true;
+    execute(QStringLiteral(
+      "if [ -x \"$HOME/.local/bin/gongchuang-preview\" ]; then "
+      "bash \"$HOME/.local/bin/gongchuang-preview\" %1; "
+      "else bash \"$HOME/my_ws/gongchuang_ros2/tools/preview.sh\" %1; fi").arg(action));
+  }
+
+  void logTerminal(const QByteArray &bytes) {
+    if (terminalLog_.isOpen()) {
+      terminalLog_.write(bytes);
+      terminalLog_.flush();
+    }
   }
 
   void clearVideo() {
     frame_ = {};
     image_->setPixmap(QPixmap());
-    image_->setText(online_ ? "无视频输入" : "等待画面");
+    if (online_ && !videoAvailable_) image_->setText("无视频输入");
+    else image_->setText(videoAvailable_ ? "正在重连视频" : "等待画面");
   }
 
   void showFrame() {
@@ -663,21 +815,31 @@ private:
   QSpinBox *quality_{new QSpinBox};
   QDoubleSpinBox *confidence_{new QDoubleSpinBox};
   QPushButton *connect_{new QPushButton("连接")}, *apply_{new QPushButton("应用设置")};
-  QPushButton *previewStart_{new QPushButton("启动预览")};
+  QToolButton *previewStart_{new QToolButton};
+  QLabel *stageLabel_{new QLabel("阶段  —")};
+  QLabel *serialLabel_{new QLabel("串口未连接")};
+  QLabel *teamLabel_{new QLabel("—")}, *angleLabel_{new QLabel("—")};
+  QPlainTextEdit *serialFrames_{new QPlainTextEdit};
+  QComboBox *serialDirection_{new QComboBox}, *serialCommand_{new QComboBox};
+  QPushButton *serialClear_{new QPushButton("清除")};
+  QStringList serialLines_;
+  qint64 serialSeq_{-1};
   QLabel *image_{new QLabel("等待画面")}, *status_{new QLabel("未连接")};
   Terminal *term_{new Terminal};
   QNetworkAccessManager http_;
   QPointer<QNetworkReply> video_, statusReply_, setting_;
   QProcess ssh_, shell_, who_;
+  QFile terminalLog_;
   QTimer poll_;
   QByteArray buffer_, shellBuffer_;
   bool pending_{false};
   bool shellReady_{false};
+  bool previewRequested_{false};
   QImage frame_;
   QString target_, sshPath_, sshError_;
   const QStringList sshArgs_{"-o", "BatchMode=yes", "-o", "ConnectTimeout=5"};
   int localPort_{18080};
-  bool active_{false}, online_{false}, hasDetector_{false};
+  bool active_{false}, online_{false}, hasDetector_{false}, videoAvailable_{false};
 };
 
 int main(int argc, char **argv) {
@@ -689,7 +851,24 @@ int main(int argc, char **argv) {
     QFrame#card { background: #ffffff; border: 1px solid #e3e7ee; border-radius: 12px; }
     QLabel { background: transparent; color: #1f2328; }
     QLabel#caption { color: #6b7480; font-weight: 600; }
-    QLabel#status { color: #5a6472; }
+    QLabel#status { color: #404b5d; }
+    QLabel#stage { background: #e6efff; color: #14346b; border: 1px solid #afc7f2;
+      border-radius: 8px; padding: 7px 10px; font-size: 17px; font-weight: 700; }
+    QToolButton#testMenu { background: #e6efff; color: #14346b; border: 1px solid #afc7f2;
+      border-radius: 8px; padding: 6px 10px; font-size: 15px; font-weight: 600; }
+    QToolButton#testMenu:hover, QToolButton#testMenu:pressed { background: #ccdefd; }
+    QToolButton#testMenu:disabled { background: #eef1f6; color: #536078; }
+    QToolButton#testMenu::menu-indicator { image: none; width: 0px; }
+    QMenu#testChoices { background: #ffffff; color: #172334; border: 1px solid #afbdd1; font-size: 15px; }
+    QMenu#testChoices::item { padding: 8px 14px; }
+    QMenu#testChoices::item:selected { background: #dbe8ff; color: #14346b; }
+    QTabWidget#rightTabs::pane { border: 1px solid #d1d9e6; background: #ffffff; }
+    QTabBar::tab { background: #edf1f7; color: #38465d; padding: 7px 13px; font-size: 15px; }
+    QTabBar::tab:selected { background: #dbe8ff; color: #14346b; font-weight: 700; }
+    QWidget#serialPage { background: #ffffff; }
+    QWidget#serialPage QLabel { color: #36445a; font-size: 15px; }
+    QWidget#serialPage QLabel#serialStatus { color: #14346b; font-size: 18px; font-weight: 700; padding-bottom: 7px; }
+    QWidget#serialPage QLabel#serialValue { color: #172334; font-size: 17px; font-weight: 700; }
     QPushButton { background: #ffffff; border: 1px solid #d7dce4; border-radius: 8px; padding: 6px 14px; color: #1f2328; }
     QPushButton:hover { border-color: #2f6fed; color: #2f6fed; }
     QPushButton:pressed { background: #eef3ff; }
@@ -703,6 +882,8 @@ int main(int argc, char **argv) {
     QComboBox QAbstractItemView::item { color: #1f2328; padding: 4px 8px; }
     QComboBox QAbstractItemView::item:selected { background: #2f6fed; color: #ffffff; }
     QFrame#terminal { background: #1e1e1e; border: 1px solid #2b2b2b; border-radius: 12px; }
+    QPlainTextEdit#serialFrames { background: #f7f9fc; color: #18263a;
+      border: 1px solid #c5d1e2; padding: 6px; font-size: 15px; }
     QPlainTextEdit#output { background: transparent; border: none; padding: 2px; color: #d4d4d4; selection-background-color: #2f6fed; }
     QSplitter::handle { background: transparent; }
     QToolTip { background: #ffffff; color: #1f2328; border: 1px solid #d7dce4; }

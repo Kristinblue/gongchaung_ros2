@@ -10,5 +10,6 @@ setup(
     ],
     entry_points={'console_scripts': [
         'approach_test_node = tests_pkg.nodes.approach_test_node:main',
+        'camera_test_node = tests_pkg.nodes.camera_test_node:main',
     ]},
 )

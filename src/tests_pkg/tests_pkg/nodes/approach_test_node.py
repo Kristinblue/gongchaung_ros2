@@ -24,7 +24,7 @@ class ApproachTest(Node):
         if not all(map(math.isfinite,(self.x,self.y))) or not all(
                 1 <= limit <= 32767 for limit in (self.turn_limit,self.move_limit)):
             raise ValueError('无效参考点或误差限幅')
-        self.active = self.connected = False
+        self.active = self.connected = self.halted = False
         self.last_stamp = 0
         self.last_frame = float('-inf')
         self.errors = self.create_publisher(Command, 'approach_test/command', 10)
@@ -32,8 +32,11 @@ class ApproachTest(Node):
         self.target = self.create_publisher(Objects, 'approach_test/target', qos)
         # callback：收到感知结果就算误差。默认只发调试话题，drive 打开且 start 成功后才发给串口。
         self.create_subscription(Objects, 'vision/objects', self.on_frame, qos)
-        if self.declare_parameter('drive', False).value:
+        self.publish_motion = self.declare_parameter('publish_motion', False).value
+        drive = self.declare_parameter('drive', False).value
+        if drive or self.publish_motion:
             self.commands = self.create_publisher(Command, 'robot/command', 10)
+        if drive:
             self.create_subscription(State, 'robot/state', self.robot_state,
                                      QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
             self.create_service(Trigger, 'approach_test/start', self.start)
@@ -51,17 +54,21 @@ class ApproachTest(Node):
         target = min(candidates, key=lambda obj:math.hypot((obj.x1+obj.x2)*.5-self.x, obj.y2-self.y),
                      default=None)
         if target is None:
-            self.send(6,0)
+            # 目标丢失时补一次停车，免得下位机一直保持上一条误差继续冲；同一次丢失只发一条。
+            if not self.halted:
+                self.halted = True
+                self.send(Command.STOP,0)
             return
+        self.halted = False
         self.target.publish(Objects(header=frame.header, width=frame.width, height=frame.height, items=[target]))
         # 横向误差给转向（02），纵向误差给前后（01），都限制在各自参数的范围内。
-        self.send(2, max(-self.turn_limit,min(self.turn_limit,(target.x1+target.x2)*.5-self.x)))
-        self.send(1, max(-self.move_limit,min(self.move_limit,target.y2-self.y)))
+        self.send(Command.TURN, max(-self.turn_limit,min(self.turn_limit,(target.x1+target.x2)*.5-self.x)))
+        self.send(Command.STRAIGHT, max(-self.move_limit,min(self.move_limit,target.y2-self.y)))
 
     def send(self, code, value):
         command = Command(code=code,value=int(value))
         self.errors.publish(command)
-        if self.active:
+        if self.active or self.publish_motion:
             self.commands.publish(command)
 
     def robot_state(self, state):
@@ -78,7 +85,7 @@ class ApproachTest(Node):
 
     def stop(self, request, response):
         if self.active:
-            self.send(6,0)
+            self.send(Command.STOP,0)
         self.active = False
         response.success = True
         return response

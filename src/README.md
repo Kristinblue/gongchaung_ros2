@@ -34,7 +34,7 @@ bash tools/setup_pi.sh ~/rknn-toolkit2/rknn-toolkit-lite2/packages/*cp310*.whl \
 bash tools/run.sh source:=usb camera_device:=/dev/video0 model:="$PWD/assets/models/train5.rknn"
 ```
 
-编译后可在 Windows 客户端点「启动预览」，或在香橙派终端运行 `bash ~/my_ws/gongchuang_ros2/tools/preview.sh start`，从任意目录启动后台预览。调试时在仓库根目录运行 `bash tools/run.sh`，可直接看前台日志。默认自动找 USB 摄像头，必要时用 `camera_device:=/dev/videoN` 指定。未接相机显示「无视频输入」。预览默认只启动摄像头、视觉处理和 HTTP 节点。Windows 客户端从本机 SSH 配置读取连接别名，连接和队友密钥配置见[客户端说明](../tools/laptop_server/README.md)。
+编译后，在 Windows 客户端连接香橙派即可看预览，用「测试节点」菜单选择靠近测试或摄像头测试。在香橙派也可以从任意目录运行 `bash ~/my_ws/gongchuang_ros2/tools/preview.sh start preview` 或 `bash ~/my_ws/gongchuang_ros2/tools/preview.sh start approach`。调试时在仓库根目录运行 `bash tools/run.sh`，可直接看前台日志。默认自动找 USB 摄像头，必要时用 `camera_device:=/dev/videoN` 指定。未接相机显示「无视频输入」。预览默认只启动摄像头、视觉处理和 HTTP 节点。Windows 客户端从本机 SSH 配置读取连接别名，连接和队友密钥配置见[客户端说明](../tools/laptop_server/README.md)。
 
 实车联调在启动命令中加 `uart:=/dev/ttyS6`，用 `ros2 service call /task/start std_srvs/srv/Trigger '{}'` 开始，`/task/stop` 停止。
 

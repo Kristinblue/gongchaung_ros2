@@ -56,8 +56,14 @@ public:
               {cv::CAP_PROP_OPEN_TIMEOUT_MSEC, 3000, cv::CAP_PROP_READ_TIMEOUT_MSEC, 3000});
           }
           cv::Mat frame;
+          bool received_frame = false;
           while (!stop_ && rclcpp::ok() && capture.read(frame)) {
             if (frame.type() != CV_8UC3) continue;
+            if (!received_frame) {
+              RCLCPP_INFO(get_logger(), "[Camera] 开始出帧 %s (%dx%d)",
+                          path.empty() ? "HTTP" : path.c_str(), frame.cols, frame.rows);
+              received_frame = true;
+            }
             // 下面要一次复制整张图。若 OpenCV 的每行之间有空隙，先复制成连续内存。
             if (!frame.isContinuous()) frame = frame.clone();
             // 这里生成的时间戳会跟着原图和 YOLO 结果走，感知节点靠它配对。
@@ -71,6 +77,9 @@ public:
             message.step = frame.cols * 3;
             message.data.assign(frame.data, frame.data + message.step * message.height);
             publisher_->publish(std::move(message));
+          }
+          if (received_frame && !stop_ && rclcpp::ok()) {
+            RCLCPP_WARN(get_logger(), "[Camera] 取帧中断，正在重连 %s", path.empty() ? "HTTP" : path.c_str());
           }
         } catch (const std::exception &error) {
           if (!stop_ && rclcpp::ok()) RCLCPP_DEBUG(get_logger(), "[Camera] %s", error.what());

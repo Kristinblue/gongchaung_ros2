@@ -12,11 +12,11 @@ static uint8_t checksum(const uint8_t *data) {
   return data[0] + data[1] + data[2] + data[3] + data[4];
 }
 
-SimpleProtocol::Frame SimpleProtocol::pack(uint8_t code, int16_t value) {
+SimpleProtocol::Frame SimpleProtocol::pack(uint8_t command, int16_t value) {
   // 先转成无符号，右移时才是逻辑移位，不会把符号位带进来。
   const uint16_t raw = static_cast<uint16_t>(value);
-  // 0xAA 0x55 是固定的两个帧头；code 是命令位；value 低字节在前。
-  Frame frame{0xaa, 0x55, code, uint8_t(raw), uint8_t(raw >> 8), 0};
+  // 0xAA 0x55 是固定的两个帧头；command 是命令位；value 低字节在前。
+  Frame frame{0xaa, 0x55, command, uint8_t(raw), uint8_t(raw >> 8), 0};
   frame.back() = checksum(frame.data());
   return frame;
 }

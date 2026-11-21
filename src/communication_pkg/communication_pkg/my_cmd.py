@@ -57,11 +57,11 @@ class MyCMD:
         self._turn_angle = 0
         self._turned = 0
 
-    def _send(self, code: int, value: int):
+    def _send(self, command: int, value: int):
         """发布 ROS2 命令消息，具体串口打包交给 SerialNode。"""
-        # Command 中的具名常量本身就是整数，可以直接填入 code。
+        # Command 中的具名常量本身就是整数，可以直接填入 command。
         # 协议里 value 是 int16，先夹到 -32768~32767，避免越界。
-        self.publisher.publish(Command(code=code, value=max(-32768,min(32767,int(value)))))
+        self.publisher.publish(Command(command=command, value=max(-32768,min(32767,int(value)))))
 
     def set_forward_error(self, error_px: int):
         """发送前后方向的像素误差，正数向前，负数向后。"""
@@ -99,7 +99,7 @@ class MyCMD:
 
     def read_feedback(self, feedback):
         """收到 01 角度后，累计本次实际转过的角度。"""
-        if feedback.code != Feedback.ANGLE or not 0 <= feedback.value <= 360:
+        if feedback.command != Feedback.ANGLE or not 0 <= feedback.value <= 360:
             return
         angle = feedback.value % 360
         if self._turn_angle and self.angle is not None:

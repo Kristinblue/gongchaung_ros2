@@ -80,47 +80,47 @@ private:
     if (!state_.connected && !simulated_) return;
     // 06 校准参数待定，先保留编号。队伍查询参数固定为 0，夹爪只能 0/1。
     // 不合法的命令直接丢弃，不去赌下位机能不能处理。
-    if (message.code > Command::STOP || (!allow_reserved_calib && message.code == Command::ANGLE_CALIB) ||
-        (message.code == Command::GET_FLAG && message.value != 0) ||
-        (message.code == Command::GRAB && (message.value < 0 || message.value > 1)) ||
-        (message.code == Command::CAMERA && (message.value < 0 || message.value > max_pitch_deg))) return;
+    if (message.command > Command::STOP || (!allow_reserved_calib && message.command == Command::ANGLE_CALIB) ||
+        (message.command == Command::GET_FLAG && message.value != 0) ||
+        (message.command == Command::GRAB && (message.value < 0 || message.value > 1)) ||
+        (message.command == Command::CAMERA && (message.value < 0 || message.value > max_pitch_deg))) return;
     if (simulated_) {
       // 模拟模式：不写串口，直接打包并发布到 serial_frames，给客户端看。
-      send(message.code, message.value);
+      send(message.command, message.value);
       return;
     }
     // 开始一次新的相对转向前，把积压的角度回包清掉。
-    if (message.code == Command::TURN_ANGLE) {
+    if (message.command == Command::TURN_ANGLE) {
       if (!my_uart_.clear_input()) {
         disconnect();
         return;
       }
       parser_.clear();
     }
-    if (!send(message.code, message.value)) {
+    if (!send(message.command, message.value)) {
       disconnect();
       return;
     }
     // 这里记录的是发给舵机的目标角度和时间。感知节点根据时间等相机画面稳定。
-    if (message.code == Command::CAMERA && (!state_.camera_known || state_.camera_deg != message.value)) {
+    if (message.command == Command::CAMERA && (!state_.camera_known || state_.camera_deg != message.value)) {
       state_.camera_known = true;
       state_.camera_deg = message.value;
       state_.camera_changed = now();
       state_pub_->publish(state_);
     }
     // 只有需要持续发送的运动误差使用短超时。一条相对转向可由 STM32 独立执行。
-    if (message.code == Command::STRAIGHT || message.code == Command::TURN) {
+    if (message.command == Command::STRAIGHT || message.command == Command::TURN) {
       moving_ = true;
       last_command_ = std::chrono::steady_clock::now();
-    } else if (message.code == Command::STOP || message.code == Command::TURN_ANGLE ||
-               message.code == Command::STRAIGHT_DIS) {
+    } else if (message.command == Command::STOP || message.command == Command::TURN_ANGLE ||
+               message.command == Command::STRAIGHT_DIS) {
       moving_ = false;
     }
   }
 
   // SimpleProtocol 打包，MyUART 只负责把字节写出去。
-  bool send(uint8_t code, int16_t value) {
-    const auto frame = SimpleProtocol::pack(code, value);
+  bool send(uint8_t command, int16_t value) {
+    const auto frame = SimpleProtocol::pack(command, value);
     // 模拟模式不碰硬件；真实模式写失败说明串口断了。
     if (!simulated_ && !my_uart_.write(frame.data(), frame.size())) return false;
     // 不管有没有真的写串口，都记录一帧 TX 给客户端。
@@ -167,18 +167,18 @@ private:
     // while 循环把缓存里所有完整帧都取出来，一帧也不落下。
     while (auto packet = parser_.parse()) {
       // 有效帧固定为六字节，按解析值重组可得到逐字节相同的回包。
-      trace(SimpleProtocol::pack(packet->code, packet->value), false);
+      trace(SimpleProtocol::pack(packet->command, packet->value), false);
       Feedback message;
-      message.code = packet->code;
+      message.command = packet->command;
       message.value = packet->value;
       feedback_->publish(message);
-      // 回包 code=0 是队伍确认：0 红方，1 蓝方，记到 State 里。
-      if (message.code == Feedback::FLAG && (message.value == 0 || message.value == 1)) {
+      // 回包 command=0 是队伍确认：0 红方，1 蓝方，记到 State 里。
+      if (message.command == Feedback::FLAG && (message.value == 0 || message.value == 1)) {
         state_.team = message.value == 0 ? "red" : "blue";
         state_pub_->publish(state_);
-      } else if (message.code == Feedback::ANGLE && message.value >= 0 && message.value <= 360 &&
+      } else if (message.command == Feedback::ANGLE && message.value >= 0 && message.value <= 360 &&
                  (!state_.angle_known || state_.angle_deg != message.value)) {
-        // 回包 code=1 是绝对角度 0~360；状态只在角度变化时更新。
+        // 回包 command=1 是绝对角度 0~360；状态只在角度变化时更新。
         state_.angle_deg = message.value;
         state_.angle_known = true;
         state_pub_->publish(state_);

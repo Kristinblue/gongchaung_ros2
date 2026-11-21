@@ -11,7 +11,7 @@
 // 一帧固定 6 个字节：
 //   [0] 0xAA      帧头 1
 //   [1] 0x55      帧头 2
-//   [2] code      命令位，1~6，含义见 my_cmd.py
+//   [2] command      命令位，1~6，含义见 my_cmd.py
 //   [3] value 低  数值低 8 位
 //   [4] value 高  数值高 8 位
 //   [5] checksum  前 5 个字节相加，只留低 8 位
@@ -24,12 +24,12 @@ public:
 
   // 拆出来的一条消息：命令位 + 有符号数值。
   struct Message {
-    uint8_t code;
+    uint8_t command;
     int16_t value;
   };
 
   // 把一条命令打包成 6 字节，会自动算校验。
-  static Frame pack(uint8_t code, int16_t value);
+  static Frame pack(uint8_t command, int16_t value);
   // 把 6 字节还原成一条消息。
   // 长度不对、帧头不对、校验不对都返回 std::nullopt，调用方用 if 判断即可。
   static std::optional<Message> unpack(const uint8_t *data, std::size_t size);

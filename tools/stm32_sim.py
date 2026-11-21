@@ -21,10 +21,10 @@ def checksum(frame):
     return sum(frame[:5]) & 0xFF
 
 
-def pack(code, value):
+def pack(command, value):
     """按 0xAA 0x55 + 命令 + 小端数值 + 校验 打包 6 字节帧。"""
     raw = value & 0xFFFF
-    frame = bytearray([0xAA, 0x55, code & 0xFF, raw & 0xFF, (raw >> 8) & 0xFF, 0])
+    frame = bytearray([0xAA, 0x55, command & 0xFF, raw & 0xFF, (raw >> 8) & 0xFF, 0])
     frame[5] = checksum(frame)
     return bytes(frame)
 
@@ -51,35 +51,35 @@ class Sim:
         self.received = 0
         self.last_report = 0.0
 
-    def handle(self, code, value):
+    def handle(self, command, value):
         self.received += 1
-        if code == 1:
+        if command == 1:
             self.distance_left = None
             self.speed = 0.0 if abs(value) <= self.speed_deadband else max(
                 -self.speed_limit, min(self.speed_limit, value * self.speed_gain))
-        elif code == 2:
+        elif command == 2:
             self.turn_target = None
             self.turn = 0.0 if abs(value) <= self.turn_deadband else max(
                 -self.turn_limit, min(self.turn_limit, -value * self.turn_gain))
-        elif code == 3:
+        elif command == 3:
             self.gripper = 1 if value else 0
-        elif code == 4:
+        elif command == 4:
             self.camera = max(0, min(80, value))
-        elif code == 5:
+        elif command == 5:
             self.distance_left = None
             self.speed = 0.0
             self.turn_target = self.yaw - math.radians(value)
             self.turn = math.copysign(0.6, -value) if value else 0.0
-        elif code == 7:
+        elif command == 7:
             self.turn = 0.0
             self.turn_target = None
             self.distance_left = value / 100.0
             self.speed = math.copysign(self.speed_limit, value) if value else 0.0
-        elif code == 8:
+        elif command == 8:
             self.speed = self.turn = 0.0
             self.turn_target = None
             self.distance_left = None
-        print(f'[Stm32Sim] {CODES.get(code, "未知")}({code:02d}) = {value}', flush=True)
+        print(f'[Stm32Sim] {CODES.get(command, "未知")}({command:02d}) = {value}', flush=True)
 
     def step(self, dt):
         delta = self.turn * dt
@@ -190,20 +190,20 @@ def main():
                 if buffer[:2] != START or buffer[5] != checksum(buffer):
                     del buffer[0]
                     continue
-                code = buffer[2]
+                command = buffer[2]
                 raw = buffer[3] | (buffer[4] << 8)
                 value = raw - 65536 if raw >= 32768 else raw
-                if code == 0 and value == 0:
+                if command == 0 and value == 0:
                     # 查询队伍后，开始连续上报角度。
                     os.write(master, pack(0, 0 if args.team == 'red' else 1))
                     greeted = True
                     last_angle = 0.0
                 else:
-                    sim.handle(code, value)
+                    sim.handle(command, value)
                 if link is not None:
-                    if code == 4:
+                    if command == 4:
                         link.send(f'C {sim.camera}')
-                    elif code == 3:
+                    elif command == 3:
                         link.send(f'G {sim.gripper}')
                 del buffer[:6]
             if link is not None and now - last_forward > 0.1:

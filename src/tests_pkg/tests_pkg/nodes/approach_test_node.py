@@ -65,11 +65,11 @@ class ApproachTest(Node):
         self.send(Command.TURN, max(-self.turn_limit,min(self.turn_limit,(target.x1+target.x2)*.5-self.x)))
         self.send(Command.STRAIGHT, -max(-self.move_limit,min(self.move_limit,target.y2-self.y)))
 
-    def send(self, code, value):
-        command = Command(code=code,value=int(value))
-        self.errors.publish(command)
+    def send(self, command, value):
+        message = Command(command=command,value=int(value))
+        self.errors.publish(message)
         if self.active or self.publish_motion:
-            self.commands.publish(command)
+            self.commands.publish(message)
 
     def robot_state(self, state):
         self.connected = state.connected

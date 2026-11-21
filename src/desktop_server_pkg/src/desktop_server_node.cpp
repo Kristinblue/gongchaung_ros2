@@ -128,7 +128,7 @@ public:
       }
       if (serial_state_.angle_known) json += ",\"angle_deg\":" + std::to_string(serial_state_.angle_deg);
       if (serial_state_.connected && serial_feedback_) {
-        json += ",\"code\":" + std::to_string(serial_feedback_->code) +
+        json += ",\"command\":" + std::to_string(serial_feedback_->command) +
           ",\"value\":" + std::to_string(serial_feedback_->value);
       }
       json += serial_simulated ? ",\"simulated\":true" : ",\"simulated\":false";

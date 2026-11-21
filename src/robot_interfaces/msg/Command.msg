@@ -1,9 +1,9 @@
-# code：动作类型，使用下面定义的具名常量
+# command：动作类型，使用下面定义的具名常量
 # value：动作参数，不同命令的单位不同
 # STRAIGHT、TURN 为像素误差
 # TURN_ANGLE、CAMERA 为角度
 # STRAIGHT_DIS 为厘米
-uint8 code
+uint8 command
 int16 value #最大32767
 
 # 动作命令位的取值，和 communication_pkg/my_cmd.py 对应。

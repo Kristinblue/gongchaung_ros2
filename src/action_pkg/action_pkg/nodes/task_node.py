@@ -33,7 +33,7 @@ class TaskNode(Node):
         # Task 调 MyCMD 的动作方法，MyCMD 发话题，SerialNode 才真正写串口。
         self.cmd = MyCMD(self.create_publisher(Command, 'robot/command', 10))
         self.task = Task(self.cmd, {'point':point,'distribute':distribute,'trans':trans})
-        self.connected = False
+        self.serial_open = False
         self.last_frame = float('-inf')
         self.last_stamp = 0
         self.last_status = None
@@ -57,12 +57,12 @@ class TaskNode(Node):
         return {name:self.declare_parameter(prefix+name,value).value for name,value in defaults.items()}
 
     def robot_state(self, message):
-        self.connected = message.connected
+        self.serial_open = message.open
         self.task.team = message.team or None
         self.task.go_to.team = self.task.team
-        if not self.connected:
+        if not self.serial_open:
             self.cmd.angle = None
-        if not self.connected and self.task.state != STOP:
+        if not self.serial_open and self.task.state != STOP:
             self.task.stop()
             self.publish_status()
 
@@ -111,8 +111,8 @@ class TaskNode(Node):
             self.last_status = match
 
     def start(self, request, response):
-        if not self.connected or self.task.state != STOP or time.monotonic() - self.last_frame > .5:
-            response.message = '需串口在线、新检测帧且任务处于停止状态'
+        if not self.serial_open or self.task.state != STOP or time.monotonic() - self.last_frame > .5:
+            response.message = '需打开串口、新检测帧且任务处于停止状态'
             return response
         self.task.start()
         self.publish_status()
@@ -132,7 +132,7 @@ class TaskNode(Node):
         self.last_frame = float('-inf')
         self.publish_status()
         response.success = True
-        response.message = '上位机已复位，已发布停车指令' if self.connected else '上位机已复位，串口未连接'
+        response.message = '上位机已复位，已发布停车指令' if self.serial_open else '上位机已复位，串口未打开'
         return response
 
     def watchdog(self):

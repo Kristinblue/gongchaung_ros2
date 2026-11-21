@@ -61,10 +61,10 @@ public:
     timer_ = create_wall_timer(10ms, [this] { read(); });
     // 先发 08,0 停车，再发 00,0 查询队伍。
     if (!my_uart_.open(device, baudrate) || !send(Command::STOP, 0) || !send(Command::GET_FLAG, 0)) {
-      disconnect();
+      close_serial();
       throw std::runtime_error("[Serial] 无法初始化串口 " + device);
     }
-    state_.connected = true;
+    state_.open = true;
     state_pub_->publish(state_);
     RCLCPP_INFO(get_logger(), "[Serial] %s %s", device.c_str(), std::to_string(baudrate).c_str());
   }
@@ -77,13 +77,17 @@ private:
   // 收到 MyCMD 发布的动作后，检查参数，再按协议写串口。
   void command_callback(const Command &message, int64_t max_pitch_deg, bool allow_reserved_calib) {
     // 串口没打开、又不是模拟模式时，任何命令都不发。
-    if (!state_.connected && !simulated_) return;
+    if (!state_.open && !simulated_) return;
     // 06 校准参数待定，先保留编号。队伍查询参数固定为 0，夹爪只能 0/1。
     // 不合法的命令直接丢弃，不去赌下位机能不能处理。
     if (message.command > Command::STOP || (!allow_reserved_calib && message.command == Command::ANGLE_CALIB) ||
         (message.command == Command::GET_FLAG && message.value != 0) ||
         (message.command == Command::GRAB && (message.value < 0 || message.value > 1)) ||
-        (message.command == Command::CAMERA && (message.value < 0 || message.value > max_pitch_deg))) return;
+        (message.command == Command::CAMERA && (message.value < 0 || message.value > max_pitch_deg))) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[Serial] 忽略非法命令 command=0x%02X value=%d",
+                           static_cast<unsigned>(message.command), static_cast<int>(message.value));
+      return;
+    }
     if (simulated_) {
       // 模拟模式：不写串口，直接打包并发布到 serial_frames，给客户端看。
       send(message.command, message.value);
@@ -92,13 +96,13 @@ private:
     // 开始一次新的相对转向前，把积压的角度回包清掉。
     if (message.command == Command::TURN_ANGLE) {
       if (!my_uart_.clear_input()) {
-        disconnect();
+        close_serial();
         return;
       }
       parser_.clear();
     }
     if (!send(message.command, message.value)) {
-      disconnect();
+      close_serial();
       return;
     }
     // 这里记录的是发给舵机的目标角度和时间。感知节点根据时间等相机画面稳定。
@@ -138,12 +142,11 @@ private:
     frames_->publish(message);
   }
 
-  // 断开串口：先尽力发一帧停车，再关闭并广播 connected=false。
-  // 这样任务节点和客户端能立刻知道串口没了。
-  void disconnect() {
-    if (my_uart_.is_open() && state_.connected) send(Command::STOP, 0);
+  // 关闭串口：先尽力发一帧停车，再发布 open=false 给任务节点和客户端。
+  void close_serial() {
+    if (my_uart_.is_open() && state_.open) send(Command::STOP, 0);
     my_uart_.close();
-    state_.connected = false;
+    state_.open = false;
     state_pub_->publish(state_);
   }
 
@@ -152,13 +155,13 @@ private:
     if (!my_uart_.is_open()) return;
     // 连续运动误差超过 750 ms 没更新时，由串口节点发停车。
     if (moving_ && std::chrono::steady_clock::now() - last_command_ > 750ms) {
-      if (!send(Command::STOP, 0)) { disconnect(); return; }
+      if (!send(Command::STOP, 0)) { close_serial(); return; }
       moving_ = false;
     }
     // 一次最多读 256 字节，够 42 帧；剩下的下一轮再读。
     uint8_t data[256];
     const auto count = my_uart_.read(data, sizeof(data));
-    if (count < 0) { disconnect(); return; }
+    if (count < 0) { close_serial(); return; }
     if (count == 0) return;
     std_msgs::msg::UInt8MultiArray bytes;
     bytes.data.assign(data, data + count);

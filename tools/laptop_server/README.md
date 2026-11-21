@@ -18,9 +18,9 @@
 
 「测试节点」菜单列出 ROS 节点原名。选 `approach_test_node` 会启动 YOLO 和靠近测试，使用 `assets/models/train5.rknn`。误差发到 `/approach_test/command`。选 `camera_test_node` 会记录分辨率和实际帧率。客户端的靠近测试会发布运动命令，再由模拟串口打包。点「结束测试」回到原图。摄像头以 YUYV、10 fps 采图。
 
-「运行串口测试 · `serial_test_node`」可选「模拟串口」或「实车串口 · `/dev/ttyS6`」。右侧终端出现 `cmd>` 后直接输入 `move_straight 0`、`move_straight -30` 或 `stop`。`quit` 或「结束测试」会回到 SSH 提示符。实车测试前先腾出串口。
+「运行串口测试 · `serial_test_node`」可选「模拟串口」或「实车串口 · `/dev/ttyS6`」。右侧终端出现 `cmd>` 后可输入 `move_straight 30`、`move_straight_dis 20`、`move_turn -50`、`move_turn_angle 30` 或 `stop`。`quit` 或「结束测试」会回到 SSH 提示符。实车测试前先腾出串口。
 
-右侧「串口」页显示十六进制字节。`TX` 是发出，`RX` 是收到的有效帧。选择模拟串口时，由 `stm32_sim.py` 提供伪串口，串口页沿用相同的显示方式。
+右侧「串口」页显示串口是否打开和十六进制字节。`TX` 是发出，`RX` 是收到的有效帧。选择模拟串口时，由 `stm32_sim.py` 提供伪串口，串口页沿用相同的显示方式。
 
 运行 `serial_test_node` 时，这一页显示当前测试的串口收发。蓝色 `TX` 是发送，红色 `RX` 是校验通过的接收帧，紫色 `RX [RAW]` 是每次串口读取的原始字节。选择 `RawData` 只看原始字节，选择具体命令位只看可识别的帧。原始行可能只含半帧，也可能含多帧。
 

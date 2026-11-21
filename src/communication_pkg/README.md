@@ -1,9 +1,16 @@
 # STM32 通信
 
-`communication_pkg/my_cmd.py` 给上层提供 `move_staight()`、`move_turn()` 等方法。`SerialNode` 持有 `MyUART`，由它调用 `serial_driver` 的 C++ 库配置串口和读写字节。`SimpleProtocol` 和 `ProtocolParser` 负责 STM32 协议的打包和解析。
+`MyCMD` 直接使用 `Command.msg` 的常量发布命令。`SerialNode` 持有 `MyUART`，由它调用 `serial_driver` 的 C++ 库配置串口和读写字节。`SimpleProtocol` 和 `ProtocolParser` 负责 STM32 协议的打包和解析。
+
+| `MyCMD` 方法 | 参数 |
+| --- | --- |
+| `move_straight(error)` | 前后像素误差，正数向前 |
+| `move_straight_dis(dis)` | 直行距离，单位厘米，正数向前 |
+| `move_turn(error)` | 转向像素误差，正数向右 |
+| `move_turn_angle(angle)` | 相对转角，单位度，正数向右 |
 
 - `/robot/command` 接收上层命令。`/robot/feedback` 发布每个解析成功的回包。消息定义在 [robot_interfaces/msg](../robot_interfaces/msg)。
-- `/robot/state` 保留最近的串口连接状态、红蓝方、相机指令角度和 STM32 上报的导航角度。首次收到导航角度后，`angle_known` 才为真。
+- `/robot/state` 的 `open` 表示串口设备是否已打开。该话题也保留红蓝方、相机指令角度和 STM32 上报的导航角度。首次收到导航角度后，`angle_known` 才为真。
 - UART 使用 `robot.yaml` 中的 `uart.device` 和 `uart.baudrate`，默认 `/dev/ttyS6`、115200。STM32 帧固定为 `AA 55 | CMD | 数值低字节 | 数值高字节 | 校验`。数值是有符号 16 位整数，校验取前五字节累加的低八位。
 
 | 命令 | 上位机发给 STM32 | STM32 发给上位机 |

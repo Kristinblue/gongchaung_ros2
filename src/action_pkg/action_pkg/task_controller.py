@@ -98,5 +98,6 @@ class Task:
         return {'state':self.state,'stage':stage,'goto_stage':goto_stage,'team':self.team,'frames':self.frame_count,'camera_value':self.camera_deg,'note':self.notes[-1] if self.notes else '', 'rank1':round(self.go_to.rank1_score,2),'rank2':self.go_to.rank2_score}
 
     def close(self):
-        """关闭动作接口。"""
-        self.cmd.close()
+        """结束任务时停车。"""
+        # 这里只发停车，不关串口；串口的生命周期归 serial_node。
+        self.cmd.move_stop()

@@ -60,7 +60,7 @@ public:
       [this](const RobotState &state) {
         std::lock_guard lock(mutex_);
         serial_state_ = state;
-        if (!state.connected) serial_feedback_.reset();
+        if (!state.open) serial_feedback_.reset();
         camera_angle_ = state.camera_known ? std::optional<int>{state.camera_deg} : std::nullopt;
       });
     // 只订阅已经解析好的回包，串口仍由通信节点独占。
@@ -121,13 +121,13 @@ public:
         "\",\"frames\":" + std::to_string(frames_) + "}";
       json += video_available() ? ",\"video_available\":true" : ",\"video_available\":false";
       const char *test = mode == "approach" ? "approach_test_node" : mode == "camera_test" ? "camera_test_node" : "";
-      json += ",\"test_node\":\"" + std::string(test) + "\",\"serial\":{\"connected\":" +
-        (serial_state_.connected ? "true" : "false");
+      json += ",\"test_node\":\"" + std::string(test) + "\",\"serial\":{\"open\":" +
+        (serial_state_.open ? "true" : "false");
       if (serial_state_.team == "red" || serial_state_.team == "blue") {
         json += ",\"team\":\"" + serial_state_.team + "\"";
       }
       if (serial_state_.angle_known) json += ",\"angle_deg\":" + std::to_string(serial_state_.angle_deg);
-      if (serial_state_.connected && serial_feedback_) {
+      if (serial_state_.open && serial_feedback_) {
         json += ",\"command\":" + std::to_string(serial_feedback_->command) +
           ",\"value\":" + std::to_string(serial_feedback_->value);
       }

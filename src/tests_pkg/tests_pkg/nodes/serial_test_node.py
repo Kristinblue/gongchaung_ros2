@@ -17,11 +17,11 @@ from communication_pkg.my_cmd import MyCMD
 
 
 HELP = '''00  启动时查询队伍（实车串口自动发送）
-01  set_forward_error 100  前后像素误差，正值向前，负值向后
-02  set_turn_error -50     转向像素误差，正值向右，负值向左
+01  move_straight 100   前后像素误差，正值向前，负值向后
+02  move_turn -50       转向像素误差，正值向右，负值向左
 03  grab 0              夹爪，0 开，1 关
 04  camera 20           相机俯角，0～80 度
-05  move_turn_a 30      相对转角（度），正值向右，负值向左
+05  move_turn_angle 30  相对转角（度），正值向右，负值向左
 06  angle_calib 90      设置当前绝对角度，暂用于模拟测试
 07  move_straight_dis 20  按厘米直行，正值向前，负值向后
 08  move_stop / stop    停车
@@ -37,14 +37,10 @@ class SerialTest(Node):
             self.create_subscription(SerialFrame, 'robot/serial_frames', self.frame_callback, 100)
             self.create_subscription(UInt8MultiArray, 'robot/serial_rx_raw', self.raw_rx_callback, 100)
         self.actions = {
-            'set_forward_error': (self.cmd.set_forward_error, -32768, 32767),
-            'set_turn_error': (self.cmd.set_turn_error, -32768, 32767),
-            # 兼容旧测试命令。
-            'move_straight': (self.cmd.set_forward_error, -32768, 32767),
-            'move_staight': (self.cmd.set_forward_error, -32768, 32767),
+            'move_straight': (self.cmd.move_straight, -32768, 32767),
             'move_straight_dis': (self.cmd.move_straight_dis, -32768, 32767),
-            'move_turn': (self.cmd.set_turn_error, -32768, 32767),
-            'move_turn_a': (self.cmd.move_turn_a, -32768, 32767),
+            'move_turn': (self.cmd.move_turn, -32768, 32767),
+            'move_turn_angle': (self.cmd.move_turn_angle, -32768, 32767),
             'grab': (self.cmd.grab, 0, 1),
             'camera': (self.cmd.camera, 0, 80),
             'angle_calib': (self.cmd.angle_calib, -32768, 32767),
@@ -52,11 +48,11 @@ class SerialTest(Node):
         }
 
     def run(self):
-        """等串口节点接通，然后逐行读取测试命令。"""
+        """等串口节点订阅命令话题，然后逐行读取测试命令。"""
         deadline = time.monotonic() + 3.0
         while not self.publisher.get_subscription_count():
             if time.monotonic() >= deadline:
-                self.get_logger().error('[SerialTest] 串口节点未连接')
+                self.get_logger().error('[SerialTest] 串口节点未订阅命令话题')
                 return 1
             time.sleep(0.1)
 
@@ -99,7 +95,7 @@ class SerialTest(Node):
             print(f'[SerialTest] {name} 参数范围为 {low} 到 {high}')
             return
 
-        if name == 'move_turn_a' and value == 0:
+        if name == 'move_turn_angle' and value == 0:
             print('[SerialTest] 相对转角为 0，无需旋转')
             return
         action(value)

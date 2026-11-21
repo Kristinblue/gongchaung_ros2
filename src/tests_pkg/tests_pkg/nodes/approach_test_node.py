@@ -24,7 +24,7 @@ class ApproachTest(Node):
         if not all(map(math.isfinite,(self.x,self.y))) or not all(
                 1 <= limit <= 32767 for limit in (self.turn_limit,self.move_limit)):
             raise ValueError('无效参考点或误差限幅')
-        self.active = self.connected = self.halted = False
+        self.active = self.serial_open = self.halted = False
         self.last_stamp = 0
         self.last_frame = float('-inf')
         self.errors = self.create_publisher(Command, 'approach_test/command', 10)
@@ -72,15 +72,15 @@ class ApproachTest(Node):
             self.commands.publish(message)
 
     def robot_state(self, state):
-        self.connected = state.connected
-        if not self.connected and self.active:
+        self.serial_open = state.open
+        if not self.serial_open and self.active:
             self.stop(None, Trigger.Response())
 
     def start(self, request, response):
-        self.active = self.connected and time.monotonic() - self.last_frame <= .5
+        self.active = self.serial_open and time.monotonic() - self.last_frame <= .5
         response.success = self.active
         if not self.active:
-            response.message = '需要串口在线和新检测帧'
+            response.message = '需要打开串口和新检测帧'
         return response
 
     def stop(self, request, response):

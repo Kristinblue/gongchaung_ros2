@@ -746,11 +746,11 @@ private:
 
   void showSerial(const QJsonObject &serial = {}) {
     if (serialTest_) return;
-    const bool connected = serial.value("connected").toBool();
-    serialLabel_->setText(connected ? "串口已连接" : "串口未连接");
+    const bool serial_open = serial.value("open").toBool();
+    serialLabel_->setText(serial_open ? "串口已打开" : "串口未打开");
     const auto team = serial.value("team").toString();
-    teamLabel_->setText(connected && !team.isEmpty() ? (team == "red" ? "红方" : "蓝方") : "—");
-    angleLabel_->setText(connected && serial.contains("angle_deg")
+    teamLabel_->setText(serial_open && !team.isEmpty() ? (team == "red" ? "红方" : "蓝方") : "—");
+    angleLabel_->setText(serial_open && serial.contains("angle_deg")
       ? QString::number(serial.value("angle_deg").toInt()) + "°" : "—");
     QStringList frames;
     for (const auto &frame : serial.value("frames").toArray()) {
@@ -931,7 +931,7 @@ private:
   QPushButton *connect_{new QPushButton("连接")}, *apply_{new QPushButton("应用置信度")};
   QToolButton *previewStart_{new QToolButton};
   QLabel *stageLabel_{new QLabel("阶段  —")};
-  QLabel *serialLabel_{new QLabel("串口未连接")};
+  QLabel *serialLabel_{new QLabel("串口未打开")};
   QLabel *teamLabel_{new QLabel("—")}, *angleLabel_{new QLabel("—")};
   QPlainTextEdit *serialFrames_{new QPlainTextEdit};
   QComboBox *serialDirection_{new QComboBox}, *serialCommand_{new QComboBox};

@@ -199,13 +199,13 @@ class GoTo:
                 self.start_track(now)
                 self.note = '发现可用画面，停车进入追踪'
             elif self.search_step==4:
-                self.cmd.set_forward_error(-int(self.config.get('lost_move',200)))
-                self.cmd.set_turn_error(0)
+                self.cmd.move_straight(-int(self.config.get('lost_move',200)))
+                self.cmd.move_turn(0)
                 duration = self.config.get('camera_settle_ms',400)+self.config.get('lost_move_ms',1000)
                 if (now-self._step_at)*1000>=duration:
                     self._next_search(now)
             elif not self.search_turn_sent:
-                self.search_turn_sent = self.cmd.move_turn_a(180 if self.search_step in (0,2) else 360)
+                self.search_turn_sent = self.cmd.move_turn_angle(180 if self.search_step in (0,2) else 360)
                 if self.search_turn_sent:
                     self._step_at = now
                 else:
@@ -243,9 +243,9 @@ class GoTo:
         forward = 0
         if abs(dx)<=self.config.get('turn_only_px',80) and abs(dy)>tolerance:
             forward = int(max(-move_limit,min(move_limit,dy)))
-        self.cmd.set_turn_error(turn)
+        self.cmd.move_turn(turn)
         # 图像纵向误差前负后正，发给 STM32 时取反。
-        self.cmd.set_forward_error(-forward)
+        self.cmd.move_straight(-forward)
         self.note = '追踪目标：前正后负、右正左负'
         return False
 

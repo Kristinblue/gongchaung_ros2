@@ -2,7 +2,7 @@
 
 参数集中在 [robot.yaml](../robot_launch/config/robot.yaml)，`task_node.ros__parameters` 下沿用 `point`、`distribute` 和 `trans`。感知节点也用 `trans.camera_settle_ms`。原 Python 配置在 `gongchuang/my_project/project_config.yaml`，可对照 `point`、`distribute`、`trans`。运行时修改 ROS 2 的 YAML，或用 `config:=/绝对路径/robot.yaml` 加载另一份。
 
-通信包里的 [MyCMD](../communication_pkg/communication_pkg/my_cmd.py) 保留 `move_staight()`、`move_turn()`、`move_turn_a()` 等动作方法，将命令发到 `/robot/command`。角度回包从 `/robot/feedback` 交给 `MyCMD.read_feedback()`。
+通信包里的 [MyCMD](../communication_pkg/communication_pkg/my_cmd.py) 用 `move_straight()`、`move_straight_dis()`、`move_turn()` 和 `move_turn_angle()` 将命令发到 `/robot/command`。角度回包从 `/robot/feedback` 交给 `MyCMD.read_feedback()`。
 
 `task_node` 执行打散 → GoTo → 停车。单项靠近测试已拆到 [tests_pkg](../tests_pkg/README.md)。
 

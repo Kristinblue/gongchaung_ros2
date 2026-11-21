@@ -33,15 +33,15 @@ class InitDisributor:
             self.cmd.grab(1)
         self.timer.start()
         if self.timer.is_timeout(self.move_ms+self.scatter_ms):
-            self.cmd.move_staight(0)
-            self.cmd.move_turn(0)
+            self.cmd.set_forward_error(0)
+            self.cmd.set_turn_error(0)
             self.done, self.note = True, '初次打散结束'
             return True
         scattering = self.timer.is_timeout(self.move_ms)
         turn = self.base_turn if scattering else 0
         # 配置沿用原来的负值前进，发送时转换为正值前进。
-        self.cmd.move_staight(-(self.scatter_forward if scattering else self.base_forward))
-        self.cmd.move_turn(turn)
+        self.cmd.set_forward_error(-(self.scatter_forward if scattering else self.base_forward))
+        self.cmd.set_turn_error(turn)
         self.note = '边前进边旋转' if turn else '向前打散'
         return False
 

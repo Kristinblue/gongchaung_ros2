@@ -17,8 +17,8 @@ from communication_pkg.my_cmd import MyCMD
 
 
 HELP = '''00  启动时查询队伍（实车串口自动发送）
-01  move_straight 30    前后误差，正值向前，负值向后
-02  move_turn 10        转向误差，正值向右，负值向左
+01  set_forward_error 100  前后像素误差，正值向前，负值向后
+02  set_turn_error -50     转向像素误差，正值向右，负值向左
 03  grab 0              夹爪，0 开，1 关
 04  camera 20           相机俯角，0～80 度
 05  move_turn_a 30      相对转角（度），正值向右，负值向左
@@ -37,10 +37,13 @@ class SerialTest(Node):
             self.create_subscription(SerialFrame, 'robot/serial_frames', self.frame_callback, 100)
             self.create_subscription(UInt8MultiArray, 'robot/serial_rx_raw', self.raw_rx_callback, 100)
         self.actions = {
-            'move_straight': (self.cmd.move_staight, -32768, 32767),
-            'move_staight': (self.cmd.move_staight, -32768, 32767),
+            'set_forward_error': (self.cmd.set_forward_error, -32768, 32767),
+            'set_turn_error': (self.cmd.set_turn_error, -32768, 32767),
+            # 兼容旧测试命令。
+            'move_straight': (self.cmd.set_forward_error, -32768, 32767),
+            'move_staight': (self.cmd.set_forward_error, -32768, 32767),
             'move_straight_dis': (self.cmd.move_straight_dis, -32768, 32767),
-            'move_turn': (self.cmd.move_turn, -32768, 32767),
+            'move_turn': (self.cmd.set_turn_error, -32768, 32767),
             'move_turn_a': (self.cmd.move_turn_a, -32768, 32767),
             'grab': (self.cmd.grab, 0, 1),
             'camera': (self.cmd.camera, 0, 80),

@@ -1,5 +1,4 @@
 """
-队友必看必看必看！
 应用层再封装
 内部是[MyUART]
 
@@ -7,6 +6,8 @@
 
 ROS 版的 MyCMD 发话题，由 SerialNode 调用 MyUART。
 """
+
+from robot_interfaces.msg import Command, Feedback
 
 # 分层说明：
 #   MyCMD（本文件）只负责“要做什么动作”，把动作翻译成命令位和数值，
@@ -20,32 +21,29 @@ ROS 版的 MyCMD 发话题，由 SerialNode 调用 MyUART。
 
 # 相机端发送的命令位对应
 # 动作与命令位的对应
-GET_FLAG = b'\x00' #确认红蓝方，0为红方，1为蓝方
-STRAIGHT = b'\x01' # 正数前进，负数后退。香橙派算完误差之后取负数再发过去。正数往前更符合直觉
-TURN = b'\x02' # 正右负左
+GET_FLAG = Command.GET_FLAG #确认红蓝方，0为红方，1为蓝方
+STRAIGHT = Command.STRAIGHT # 正数前进，负数后退。香橙派算完误差之后取负数再发过去。正数往前更符合直觉
+TURN = Command.TURN # 正右负左
 
 #爪子有限位，需映射角度，暂且先弄最大和最小吧
 # 之后应该还要在单片机里面加对角度的判断，有些角度抓取物块不能完全闭合，应该是检测堵转或者实际角度？
-GRAB= b'\x03' # 0为开，1为关
+GRAB= Command.GRAB # 0为开，1为关
 
 # 摄像头角度：0度水平，向下为正；当前限位下整数指令范围0–80度。
-CAM_ANGLE = b'\x04'
+CAM_ANGLE = Command.CAMERA
 
 #角度旋转
-TURN_ANGLE = b'\x05' # 以当前方向为基准，正数为右转角度，顺时针，负数左转
-ANGLE_CALIB = b'\x06' # 绝对角度校准，利用安全区的，之后具体规定
-STRAIGHT_DIS = b'\x07' # 直线行驶，单位cm，正数前进，负数后退。
+TURN_ANGLE = Command.TURN_ANGLE # 以当前方向为基准，正数为右转角度，顺时针，负数左转
+ANGLE_CALIB = Command.ANGLE_CALIB # 绝对角度校准，利用安全区的，之后具体规定
+STRAIGHT_DIS = Command.STRAIGHT_DIS # 直线行驶，单位cm，正数前进，负数后退。
 #可能是需要具体距离的，因为我想通过这个快速调整接近安全区的姿态
-STOP = b'\x08'
+STOP = Command.STOP
 
 
 # 接收的命令对应
-FLAG = b'\x00' #确认红蓝方，0为红方，1为蓝方
-ANGLE = b'\x01' #得到绝对的角度，初始朝向必须准，暂且假设红色指向蓝色的为0度，逆时针增大，0-360度
+FLAG = Feedback.FLAG #确认红蓝方，0为红方，1为蓝方
+ANGLE = Feedback.ANGLE #得到绝对的角度，初始朝向必须准，暂且假设红色指向蓝色的为0度，逆时针增大，0-360度
 # 需要
-
-
-from robot_interfaces.msg import Command, Feedback
 
 
 class MyCMD:
@@ -59,11 +57,19 @@ class MyCMD:
         self._turn_angle = 0
         self._turned = 0
 
-    def _send(self, cmd, value):
-        """在 ROS 话题上发送动作命令，由串口节点按原协议打包。"""
-        # cmd 是单字节 bytes（如 b'\x01'），cmd[0] 取出的就是整数 1。
+    def _send(self, code: int, value: int):
+        """发布 ROS2 命令消息，具体串口打包交给 SerialNode。"""
+        # Command 中的具名常量本身就是整数，可以直接填入 code。
         # 协议里 value 是 int16，先夹到 -32768~32767，避免越界。
-        self.publisher.publish(Command(code=cmd[0], value=max(-32768,min(32767,int(value)))))
+        self.publisher.publish(Command(code=code, value=max(-32768,min(32767,int(value)))))
+
+    def set_forward_error(self, error_px: int):
+        """发送前后方向的像素误差，正数向前，负数向后。"""
+        self._send(Command.STRAIGHT, error_px)
+
+    def set_turn_error(self, error_px: int):
+        """发送转向像素误差，正数向右，负数向左。"""
+        self._send(Command.TURN, error_px)
 
     def move_staight(self, speed:int):
         """前进/后退，正数前进，负数后退
@@ -71,7 +77,7 @@ class MyCMD:
         不是严格的speed！！！！！
         """
         # speed 是像素误差，不是 m/s；实际速度由 STM32 的 PID 决定。
-        self._send(STRAIGHT, speed)
+        self.set_forward_error(speed)
 
     def move_straight_dis(self, distance:int):
         """按厘米直行，正数前进，负数后退，由 STM32 执行。"""
@@ -80,7 +86,7 @@ class MyCMD:
     def move_turn(self, speed:int):
         """转向，正右负左"""
         # 和前进一样，单位是像素误差，正右负左。
-        self._send(TURN, speed)
+        self.set_turn_error(speed)
 
     def move_turn_a(self,angle:int):
         """直接发送相对转角，返回是否已接受请求。"""

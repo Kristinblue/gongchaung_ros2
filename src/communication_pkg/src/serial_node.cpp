@@ -37,6 +37,7 @@ public:
     simulated_ = declare_parameter("simulate", false);
     // uart.device / uart.baudrate 和 robot.yaml 里的层级一致。
     const auto device = declare_parameter("uart.device", "/dev/ttyS6");
+    const bool allow_reserved_calib = declare_parameter("uart.allow_reserved_calib", simulated_);
     const auto baudrate = declare_parameter("uart.baudrate", 115200);
     // 相机俯角的软件限位，0 度水平，向下为正。
     const auto max_pitch_deg = declare_parameter("max_pitch_deg", 80);
@@ -49,8 +50,8 @@ public:
     frames_ = create_publisher<SerialFrame>("robot/serial_frames", 100);
     raw_rx_ = create_publisher<std_msgs::msg::UInt8MultiArray>("robot/serial_rx_raw", 100);
     // callback：收到 MyCMD 的命令，交给下面的 command_callback()。
-    sub_ = create_subscription<Command>("robot/command", 10, [this, max_pitch_deg](const Command &message) {
-      command_callback(message, max_pitch_deg);
+    sub_ = create_subscription<Command>("robot/command", 10, [this, max_pitch_deg, allow_reserved_calib](const Command &message) {
+      command_callback(message, max_pitch_deg, allow_reserved_calib);
     });
     if (simulated_) {
       RCLCPP_INFO(get_logger(), "[Serial] 模拟模式，记录发送帧");
@@ -58,7 +59,7 @@ public:
     }
     // callback：每 10 ms 调 read() 检查回包。非阻塞打开串口，没数据时立即返回。
     timer_ = create_wall_timer(10ms, [this] { read(); });
-    // 先发 07,0 停车，再发 00,0 查询队伍。
+    // 先发 08,0 停车，再发 00,0 查询队伍。
     if (!my_uart_.open(device, baudrate) || !send(Command::STOP, 0) || !send(Command::GET_FLAG, 0)) {
       disconnect();
       throw std::runtime_error("[Serial] 无法初始化串口 " + device);
@@ -74,12 +75,12 @@ public:
 
 private:
   // 收到 MyCMD 发布的动作后，检查参数，再按协议写串口。
-  void command_callback(const Command &message, int64_t max_pitch_deg) {
+  void command_callback(const Command &message, int64_t max_pitch_deg, bool allow_reserved_calib) {
     // 串口没打开、又不是模拟模式时，任何命令都不发。
     if (!state_.connected && !simulated_) return;
     // 06 校准参数待定，先保留编号。队伍查询参数固定为 0，夹爪只能 0/1。
     // 不合法的命令直接丢弃，不去赌下位机能不能处理。
-    if (message.code > Command::STOP || (!simulated_ && message.code == Command::ANGLE_CALIB) ||
+    if (message.code > Command::STOP || (!allow_reserved_calib && message.code == Command::ANGLE_CALIB) ||
         (message.code == Command::GET_FLAG && message.value != 0) ||
         (message.code == Command::GRAB && (message.value < 0 || message.value > 1)) ||
         (message.code == Command::CAMERA && (message.value < 0 || message.value > max_pitch_deg))) return;
@@ -111,7 +112,8 @@ private:
     if (message.code == Command::STRAIGHT || message.code == Command::TURN) {
       moving_ = true;
       last_command_ = std::chrono::steady_clock::now();
-    } else if (message.code == Command::STOP || message.code == Command::TURN_ANGLE) {
+    } else if (message.code == Command::STOP || message.code == Command::TURN_ANGLE ||
+               message.code == Command::STRAIGHT_DIS) {
       moving_ = false;
     }
   }

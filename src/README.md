@@ -20,13 +20,14 @@ Windows 用 WSL2 Ubuntu 22.04，香橙派 5 Plus 用 Ubuntu Jammy ARM64。两端
 
 ```bash
 sudo apt install ros-humble-ros-base ros-humble-rosidl-default-generators ros-humble-ament-cmake-python \
+  ros-humble-serial-driver ros-humble-asio-cmake-module libasio-dev \
   python3-colcon-common-extensions libopencv-dev python3-opencv python3-venv
 bash tools/build.sh
 ```
 
 ## 香橙派
 
-用 `ssh pio` 或 `ssh pio-relay`，在 `~/my_ws/gongchuang_ros2` 拉取并编译。首次使用派上已有的 RKNNLite wheel 和模型：
+用 `ssh pio` 或 `ssh pio-relay` 登录，在 `~/my_ws/gongchuang_ros2` 拉取并编译。该目录对应 GitHub 仓库 [Kristinblue/gongchuang_2](https://github.com/Kristinblue/gongchuang_2)。首次使用派上已有的 RKNNLite wheel 和模型：
 
 ```bash
 bash tools/setup_pi.sh ~/rknn-toolkit2/rknn-toolkit-lite2/packages/*cp310*.whl \
@@ -56,3 +57,13 @@ bash tools/sim/run_sim.sh mode:=approach model:="$PWD/assets/models/train5.onnx"
 日常参数在 [robot.yaml](robot_launch/config/robot.yaml)，原版留在 [project_config.yaml](../tools/legacy/project_config.yaml)。参见[单独验证靠近](tests_pkg/README.md)。
 
 视觉 ROS 入口在 `vision_pkg/scripts/`，算法在 `vision_pkg/modules/`。任务顺序在 `action_pkg/action_pkg/task_controller.py`。
+
+安全区按需识别由 C++ 节点 `safety_detector_node` 提供。启动时加 `safety_detector:=true`，然后在已 source 工作区的另一个终端开启识别。
+
+```bash
+bash tools/run.sh safety_detector:=true
+ros2 service call /vision/safety_detector/enable std_srvs/srv/SetBool '{data: true}'
+ros2 topic echo /vision/safety_detection --qos-reliability best_effort
+```
+
+开启后持续处理 `camera/image`，图像队列只留一帧。关闭时对同一服务发 `{data: false}`，节点解除图像订阅。结果包含相机时间戳、`flag`、`detected/full/ok` 和原图多边形。有效帧里没有安全区也会发 `detected=False`；相机断流时用结果时间戳判断超时。

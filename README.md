@@ -3,7 +3,7 @@ date created: 2026-11-14  11：56
 date modified: 2026-11-15  14：42
 ---
 # 项目说明
-这是2027工创赛的代码仓库，这里只包含上位机部分，从原工程转过来的，现在仍有很多没完善
+这是 2027 工创赛的上位机代码仓库 [Kristinblue/gongchuang_2](https://github.com/Kristinblue/gongchuang_2)，从原工程转过来的，现在仍有很多没完善。
 服务运行在香橙派上，默认预览车上的摄像头。
 
 ## 一、环境说明

@@ -66,7 +66,7 @@ bash tools/run.sh uart:=/dev/pts/N model:="$PWD/assets/models/train5.onnx"
 bash tools/run.sh uart:=/dev/pts/N mode:=approach model:="$PWD/assets/models/train5.onnx"
 ```
 
-伪串口收到 `00, 0` 后回 `00` 队伍信息，并用 `01` 连续上报角度。`01/02/03/04/05/07` 按现有协议处理并打印速度和位姿。`/robot/state` 会显示串口状态、队伍和导航角度。
+伪串口收到 `00, 0` 后回 `00` 队伍信息，并用 `01` 连续上报角度。`01/02/03/04/05/07/08` 按现有协议处理并打印速度和位姿。`01` 正值向前，`07` 按厘米直行，`08` 停车。`/robot/state` 会显示串口状态、队伍和导航角度。
 
 加上 `--sim-host` 后，假板还会把动作转发给仿真，车就真的动起来：
 

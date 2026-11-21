@@ -39,7 +39,8 @@ class InitDisributor:
             return True
         scattering = self.timer.is_timeout(self.move_ms)
         turn = self.base_turn if scattering else 0
-        self.cmd.move_staight(self.scatter_forward if scattering else self.base_forward)
+        # 配置沿用原来的负值前进，发送时转换为正值前进。
+        self.cmd.move_staight(-(self.scatter_forward if scattering else self.base_forward))
         self.cmd.move_turn(turn)
         self.note = '边前进边旋转' if turn else '向前打散'
         return False

@@ -1,53 +1,48 @@
 /*
-hyf
+hyf移植以前的
+这里是控制串口收发的，以及资源管理
+
 
 */
 #include "communication_pkg/my_uart.hpp"
 
+#include <algorithm>
 #include <cerrno>
+#include <exception>
 #include <fcntl.h>
+#include <limits>
 #include <poll.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+#include <vector>
 
 MyUART::~MyUART() {
   close();
 }
 
 bool MyUART::open(const std::string &device, int64_t baudrate) {
-  // 这些是 Linux termios 提供的波特率常量。
-  // 不用数字直接赋值，是因为不同平台/驱动要求用 Bxxx 宏。
-  speed_t speed;
-  switch (baudrate) {
-    case 9600: speed = B9600; break;
-    case 19200: speed = B19200; break;
-    case 38400: speed = B38400; break;
-    case 57600: speed = B57600; break;
-    case 115200: speed = B115200; break;
-    case 230400: speed = B230400; break;
-    default: return false;
-  }
-
-  // 先关掉可能已经打开的旧串口，避免 fd 泄漏。
   close();
-  // O_RDWR 读写；O_NOCTTY 不把串口当成进程的控制终端；
-  // O_NONBLOCK 非阻塞，read() 没数据时立刻返回，不会卡住 ROS 的定时器。
-  fd_ = ::open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
-  termios config{};
-  if (fd_ < 0 || ioctl(fd_, TIOCEXCL) != 0 || tcgetattr(fd_, &config) != 0) {
-    // TIOCEXCL 让别的进程不能再打开同一个串口，防止两个节点抢串口。
+  if (baudrate <= 0 || baudrate > std::numeric_limits<uint32_t>::max()) return false;
+
+  // O_NOCTTY 不把串口当成进程的控制终端。先拿锁，避免两个节点同时初始化。
+  control_fd_ = ::open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
+  if (control_fd_ < 0 || ::flock(control_fd_, LOCK_EX | LOCK_NB) != 0) {
     close();
     return false;
   }
-
-  // 按原始字节读写，避免系统像处理终端输入那样解释换行等字符。
-  cfmakeraw(&config);
-  // CLOCAL：忽略调制解调器控制线；CREAD：允许接收。
-  config.c_cflag |= CLOCAL | CREAD;
-  // 分别设置输入、输出波特率，然后一次性写回驱动。
-  if (cfsetispeed(&config, speed) != 0 || cfsetospeed(&config, speed) != 0 ||
-      tcsetattr(fd_, TCSANOW, &config) != 0) {
+  try {
+    using namespace drivers::serial_driver;
+    const SerialPortConfig config(static_cast<uint32_t>(baudrate), FlowControl::NONE, Parity::NONE, StopBits::ONE);
+    port_ = std::make_unique<SerialPort>(io_, device, config);
+    port_->open();
+  } catch (const std::exception &) {
+    close();
+    return false;
+  }
+  // TIOCEXCL 让别的进程不能再打开同一个串口，防止两个节点抢串口。
+  if (::ioctl(control_fd_, TIOCEXCL) != 0) {
     close();
     return false;
   }
@@ -55,41 +50,57 @@ bool MyUART::open(const std::string &device, int64_t baudrate) {
 }
 
 bool MyUART::is_open() const {
-  return fd_ >= 0;
+  return port_ && port_->is_open();
 }
 
 bool MyUART::write(const uint8_t *data, std::size_t size) {
-  // 一次 write() 可能只写出部分数据，所以记住已经写了多少。
-  for (std::size_t sent = 0; sent < size;) {
-    const auto count = ::write(fd_, data + sent, size - sent);
-    if (count > 0) {
+  if (!is_open()) return false;
+  try {
+    // 一次发送可能只写出一部分。等待可写后，把剩余字节交给库。
+    for (std::size_t sent = 0; sent < size;) {
+      pollfd output{control_fd_, POLLOUT, 0};
+      if (::poll(&output, 1, 20) <= 0 || !(output.revents & POLLOUT) ||
+          (output.revents & (POLLERR | POLLHUP | POLLNVAL))) return false;
+      const auto count = port_->send(std::vector<uint8_t>(data + sent, data + size));
+      if (count == 0) return false;
       sent += count;
-    } else if (count < 0 && (errno == EAGAIN || errno == EINTR)) {
-      // EAGAIN：发送缓冲区满了，等最多 20 ms 再试。
-      // EINTR：被信号打断，重试即可。
-      pollfd output{fd_, POLLOUT, 0};
-      if (::poll(&output, 1, 20) <= 0) return false;
-    } else {
-      // 其他错误（比如串口被拔掉）直接失败，让调用方断开。
-      return false;
     }
+  } catch (const std::exception &) {
+    return false;
   }
   return true;
 }
 
 ssize_t MyUART::read(uint8_t *data, std::size_t size) {
-  // 非阻塞模式：没有数据时 read() 返回 -1 且 errno 是 EAGAIN，这里当成“读到 0 个字节”。
-  const auto count = ::read(fd_, data, size);
-  if (count < 0 && (errno == EAGAIN || errno == EINTR)) return 0;
-  return count;
+  if (!is_open()) return -1;
+  if (size == 0) return 0;
+  // 库的 receive() 会等待数据，ROS 定时器只在确认有字节可读时调用它。
+  pollfd input{control_fd_, POLLIN, 0};
+  const int ready = ::poll(&input, 1, 0);
+  if (ready < 0) return errno == EINTR ? 0 : -1;
+  if (input.revents & (POLLERR | POLLHUP | POLLNVAL)) return -1;
+  if (!(input.revents & POLLIN)) return 0;
+
+  int available = 0;
+  if (::ioctl(control_fd_, FIONREAD, &available) != 0) return -1;
+  if (available <= 0) return 0;
+  try {
+    std::vector<uint8_t> bytes(std::min(size, static_cast<std::size_t>(available)));
+    const auto count = port_->receive(bytes);
+    std::copy_n(bytes.begin(), count, data);
+    return static_cast<ssize_t>(count);
+  } catch (const std::exception &) {
+    return -1;
+  }
 }
 
 bool MyUART::clear_input() {
   // TCIFLUSH：只清“已经收到但还没读走”的输入缓存，不影响还没发完的数据。
-  return ::tcflush(fd_, TCIFLUSH) == 0;
+  return control_fd_ >= 0 && ::tcflush(control_fd_, TCIFLUSH) == 0;
 }
 
 void MyUART::close() {
-  if (fd_ >= 0) ::close(fd_);
-  fd_ = -1;
+  port_.reset();
+  if (control_fd_ >= 0) ::close(control_fd_);
+  control_fd_ = -1;
 }

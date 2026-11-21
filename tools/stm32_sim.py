@@ -10,10 +10,11 @@ import os
 import pty
 import select
 import socket
+import sys
 import time
 
 START = b'\xaa\x55'
-CODES = {0: '查询队伍', 1: '前进', 2: '转向', 3: '夹爪', 4: '相机', 5: '相对转角', 6: '角度校准（保留）', 7: '停车'}
+CODES = {0: '查询队伍', 1: '前进', 2: '转向', 3: '夹爪', 4: '相机', 5: '相对转角', 6: '角度校准（保留）', 7: '距离直行', 8: '停车'}
 
 
 def checksum(frame):
@@ -46,14 +47,16 @@ class Sim:
         self.gripper = 0
         self.camera = 0
         self.turn_target = None
+        self.distance_left = None
         self.received = 0
         self.last_report = 0.0
 
     def handle(self, code, value):
         self.received += 1
         if code == 1:
+            self.distance_left = None
             self.speed = 0.0 if abs(value) <= self.speed_deadband else max(
-                -self.speed_limit, min(self.speed_limit, -value * self.speed_gain))
+                -self.speed_limit, min(self.speed_limit, value * self.speed_gain))
         elif code == 2:
             self.turn_target = None
             self.turn = 0.0 if abs(value) <= self.turn_deadband else max(
@@ -63,12 +66,19 @@ class Sim:
         elif code == 4:
             self.camera = max(0, min(80, value))
         elif code == 5:
+            self.distance_left = None
             self.speed = 0.0
             self.turn_target = self.yaw - math.radians(value)
             self.turn = math.copysign(0.6, -value) if value else 0.0
         elif code == 7:
+            self.turn = 0.0
+            self.turn_target = None
+            self.distance_left = value / 100.0
+            self.speed = math.copysign(self.speed_limit, value) if value else 0.0
+        elif code == 8:
             self.speed = self.turn = 0.0
             self.turn_target = None
+            self.distance_left = None
         print(f'[Stm32Sim] {CODES.get(code, "未知")}({code:02d}) = {value}', flush=True)
 
     def step(self, dt):
@@ -79,8 +89,16 @@ class Sim:
             self.turn_target = None
         else:
             self.yaw += delta
-        self.x += self.speed * math.cos(self.yaw) * dt
-        self.y += self.speed * math.sin(self.yaw) * dt
+        distance = self.speed * dt
+        if self.distance_left is not None:
+            if abs(distance) >= abs(self.distance_left):
+                distance = self.distance_left
+                self.distance_left = None
+                self.speed = 0.0
+            else:
+                self.distance_left -= distance
+        self.x += distance * math.cos(self.yaw)
+        self.y += distance * math.sin(self.yaw)
 
     def report(self):
         return (f'[Stm32Sim] x={self.x:+.3f} y={self.y:+.3f} yaw={math.degrees(self.yaw):+7.1f} 度 '
@@ -120,6 +138,7 @@ class Link:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--team', choices=('red', 'blue'), default='red', help='收到启动查询后回的队伍')
+    parser.add_argument('--device-only', action='store_true', help='标准输出只打印伪串口路径')
     parser.add_argument('--sim-host', default='', help='仿真控制地址，如 WSL 的 172.27.176.1 或派上的 192.168.60.1')
     parser.add_argument('--sim-port', type=int, default=8091, help='仿真控制端口')
     parser.add_argument('--speed-gain', type=float, default=0.00015, help='前进像素误差→m/s')
@@ -134,6 +153,9 @@ def main():
     name = os.ttyname(slave)
     # 不长期占着 slave：serial_node 要 TIOCEXCL 独占，上一轮残留的独占标志会挡住重开。
     os.close(slave)
+    if args.device_only:
+        print(name, flush=True)
+        sys.stdout = open(os.devnull, 'w')
     sim = Sim(args.team, args.speed_gain, args.turn_gain, args.speed_limit,
               args.turn_limit, args.speed_deadband, args.turn_deadband)
     link = Link(args.sim_host, args.sim_port) if args.sim_host else None

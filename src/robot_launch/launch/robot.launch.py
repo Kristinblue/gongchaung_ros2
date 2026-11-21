@@ -27,8 +27,8 @@ def nodes(context):
     point_x, point_y = float(point.get('x0', 640.0)), float(point.get('y0', 550.0))
     camera = settings.get('camera_node', {}).get('ros__parameters', {})
     simulate_uart = value('simulate_uart') == 'true'
-    if simulate_uart and (uart or mode != 'approach'):
-        raise ValueError('模拟串口仅适用于未指定 uart 的靠近测试')
+    if simulate_uart and (not uart.startswith('/dev/pts/') or mode != 'approach'):
+        raise ValueError('用 tools/run.sh 为靠近测试启动 STM32 模拟器')
     fps = int(value('camera_fps') or camera.get('FPS', 60))
     FOURCC = value('camera_fourcc') or camera.get('FOURCC', 'MJPG')
     if source not in ('usb', 'http') or (source == 'http' and not url):
@@ -47,20 +47,20 @@ def nodes(context):
 
     # 默认链路：相机 → 感知节点转发画面 → HTTP 服务。
     actions = [
-        node('desktop_server_pkg', 'desktop_server_node', camera_source=source, mode=mode, serial_simulated=simulate_uart, port=int(value('port')), **{'point.x0': point_x, 'point.y0': point_y}),
+        node('desktop_server_pkg', 'desktop_server_node', camera_source=source, mode=mode, yolo_enabled=bool(model), serial_simulated=simulate_uart, port=int(value('port')), **{'point.x0': point_x, 'point.y0': point_y}),
         node('vision_pkg', 'perception_node', detect=bool(model), camera_settle_ms=trans.get('camera_settle_ms', 400)),
         node('vision_pkg', 'camera_node', device=value('camera_device'),
              url=url, FPS=fps, FOURCC=FOURCC),
     ]
+    if value('safety_detector') == 'true':
+        actions.append(node('vision_pkg', 'safety_detector_node'))
     # 有模型才做推理。串口由 uart 启用，靠近测试和正式任务只选其中一个。
     if model:
         actions.append(node('vision_pkg', 'inference_node', **{'yolo.model_path': model}))
     if uart:
         actions.append(node('communication_pkg', 'serial_node', max_pitch_deg=camera.get('max_pitch_deg', 80), **{'uart.device': uart}))
-    if simulate_uart:
-        actions.append(node('communication_pkg', 'serial_node', simulate=True))
     if mode == 'approach':
-        overrides = {'drive': bool(uart), 'publish_motion': simulate_uart}
+        overrides = {'drive': bool(uart) and not simulate_uart, 'publish_motion': simulate_uart}
         if value('color'):
             overrides['color'] = value('color')
         actions.append(node('tests_pkg', 'approach_test_node', **overrides))
@@ -85,6 +85,7 @@ def generate_launch_description():
         DeclareLaunchArgument('uart', default_value=''),
         DeclareLaunchArgument('simulate_uart', default_value='false'),
         DeclareLaunchArgument('mode', default_value='preview'),
+        DeclareLaunchArgument('safety_detector', default_value='false'),
         DeclareLaunchArgument('color', default_value=''),
         OpaqueFunction(function=nodes),
     ])

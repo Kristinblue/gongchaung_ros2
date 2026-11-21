@@ -1,5 +1,6 @@
 /build/
 /install/
+/AGENTS.md
 /log/
 /tools/logs/colcon/
 __pycache__/

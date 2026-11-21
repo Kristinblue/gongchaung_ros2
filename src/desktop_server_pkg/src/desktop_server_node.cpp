@@ -22,6 +22,7 @@
 #include <rcl_interfaces/srv/get_parameters.hpp>
 #include <rcl_interfaces/srv/set_parameters_atomically.hpp>
 #include "httplib.h"
+#include "safety_http.hpp"
 
 using namespace std::chrono_literals;
 using Image = sensor_msgs::msg::Image;
@@ -70,7 +71,6 @@ public:
     serial_frames_ = create_subscription<SerialFrame>("robot/serial_frames", 100, [this](const SerialFrame &frame) {
       constexpr char hex[] = "0123456789ABCDEF";
       std::string line = frame.tx ? "TX" : "RX";
-      if (frame.simulated) line += " [SIM]";
       for (auto byte : frame.data) {
         line += ' ';
         line += hex[byte >> 4];
@@ -205,6 +205,11 @@ public:
             sink.write(reinterpret_cast<const char *>(jpeg->data()), jpeg->size()) && sink.write("\r\n", 2);
         }, [this](bool) { --viewers_; });
     });
+    safety_http_ = std::make_unique<SafetyHttp>(*this, server_,
+      declare_parameter("yolo_enabled", false), point_x, point_y, [this] {
+        std::lock_guard lock(mutex_);
+        return stage_ == "track" ? selected_ : Objects::ConstSharedPtr{};
+      });
     if (!server_.bind_to_port(host, port)) throw std::runtime_error("无法监听 HTTP 端口");
     // HTTP 接请求和图像压缩各跑各的，ROS 的 spin 在 main() 里继续接话题和参数服务回复。
     http_ = std::thread([this] { server_.listen_after_bind(); });
@@ -263,6 +268,11 @@ private:
     std::optional<int> last_angle;
     while (!stop_) {
       const auto next = std::chrono::steady_clock::now() + 100ms;
+      if (!viewers_.load()) {
+        last.reset();
+        std::this_thread::sleep_until(next);
+        continue;
+      }
       Image::ConstSharedPtr image;
       Objects::ConstSharedPtr selected;
       std::string stage;
@@ -332,6 +342,7 @@ private:
   }
 
   httplib::Server server_;
+  std::unique_ptr<SafetyHttp> safety_http_;
   // ROS callback、压缩线程和 HTTP 请求共享画面和状态，用同一把锁取值或更新。
   std::mutex mutex_;
   std::condition_variable ready_;

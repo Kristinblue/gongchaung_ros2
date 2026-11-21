@@ -8,6 +8,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Command.msg" "msg/Feedback.msg" "msg/State.msg" "msg/MatchState.msg" "msg/SerialFrame.msg"
   "msg/Object.msg" "msg/Objects.msg" "msg/Region.msg" "msg/SafetyRegions.msg"
+  "msg/SafetyDetection.msg"
   DEPENDENCIES builtin_interfaces std_msgs geometry_msgs)
 ament_export_dependencies(rosidl_default_runtime)
 ament_package()

@@ -199,7 +199,7 @@ class GoTo:
                 self.start_track(now)
                 self.note = '发现可用画面，停车进入追踪'
             elif self.search_step==4:
-                self.cmd.move_staight(int(self.config.get('lost_move',200)))
+                self.cmd.move_staight(-int(self.config.get('lost_move',200)))
                 self.cmd.move_turn(0)
                 duration = self.config.get('camera_settle_ms',400)+self.config.get('lost_move_ms',1000)
                 if (now-self._step_at)*1000>=duration:
@@ -244,8 +244,9 @@ class GoTo:
         if abs(dx)<=self.config.get('turn_only_px',80) and abs(dy)>tolerance:
             forward = int(max(-move_limit,min(move_limit,dy)))
         self.cmd.move_turn(turn)
-        self.cmd.move_staight(forward)
-        self.note = '追踪目标：前负后正、右正左负'
+        # 图像纵向误差前负后正，发给 STM32 时取反。
+        self.cmd.move_staight(-forward)
+        self.note = '追踪目标：前正后负、右正左负'
         return False
 
     def view_ready(self, now):

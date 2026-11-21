@@ -20,14 +20,19 @@ case "${1:-start}" in
     args=(source:=usb "mode:=$mode" camera_fps:=10 camera_fourcc:=YUYV)
     ros_domain=${ROS_DOMAIN_ID:-0}
     case "$mode" in
-      preview|camera_test) ;;
+      preview)
+        args+=(safety_detector:=true)
+        model="$PWD/assets/models/train5.rknn"
+        if [[ -r "$model" ]]; then args+=("model:=$model"); fi
+        ;;
+      camera_test) ;;
       approach)
         model="$PWD/assets/models/train5.rknn"
         if [[ ! -r "$model" ]]; then
           echo "靠近测试需要模型 $model" >&2
           exit 1
         fi
-        args+=("model:=$model" simulate_uart:=true)
+        args+=("model:=$model" simulate_uart:=true safety_detector:=true)
         ros_domain=27
         ;;
       *) echo "未知启动模式: $mode" >&2; exit 2 ;;

@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <serial_driver/serial_port.hpp>
 #include <string>
 #include <sys/types.h>
 
@@ -18,15 +20,15 @@ public:
   MyUART() = default;
   // 析构时自动 close()，所以 serial_node 不需要手动关。
   ~MyUART();
-  // 禁止拷贝：fd_ 代表一个独占的串口，拷贝后两个对象会 close 同一个 fd。
+  // 禁止拷贝：一个 MyUART 对象独占打开的串口。
   MyUART(const MyUART &) = delete;
   MyUART &operator=(const MyUART &) = delete;
 
   // 打开串口并配置成原始字节模式。
-  // device 例如 "/dev/ttyS6"；baudrate 只支持 9600～230400 的常用值。
-  // 成功返回 true；失败返回 false（内部会关掉 fd），不抛异常。
+  // device 例如 "/dev/ttyS6"；baudrate 由 serial_driver 配置。
+  // 成功返回 true；失败返回 false（内部会关闭串口），不抛异常。
   bool open(const std::string &device, int64_t baudrate);
-  // 串口是否处于打开状态，等价于 fd_ >= 0。
+  // 串口是否处于打开状态。
   bool is_open() const;
   // 把 size 个字节全部写出去，内部会处理“一次只写出一部分”的情况。
   // 返回 false 表示串口出错或超时，调用方应该断开连接。
@@ -40,6 +42,9 @@ public:
   void close();
 
 private:
-  // Linux 用 fd_ 这个整数代表已打开的串口，-1 表示没有打开。
-  int fd_{-1};
+  // 由现有 ROS 回调读写串口，无需让 serial_driver 另开线程。
+  drivers::common::IoContext io_{0};
+  std::unique_ptr<drivers::serial_driver::SerialPort> port_;
+  // 库未暴露设备描述符，用这个描述符做独占、清缓存和读写就绪检查。
+  int control_fd_{-1};
 };

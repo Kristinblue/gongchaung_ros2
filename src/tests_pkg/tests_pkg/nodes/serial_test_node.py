@@ -16,14 +16,16 @@ from std_msgs.msg import UInt8MultiArray
 from communication_pkg.my_cmd import MyCMD
 
 
-HELP = '''move_straight -30   前后误差，负值向前，正值向后
-move_turn 10        转向误差，正值向右，负值向左
-move_turn_a 30      相对转角（度），正值向右，负值向左
-grab 0              夹爪，0 开，1 关
-camera 20           相机俯角，0～80 度
-angle_calib 90      设置当前绝对角度，06 暂用于模拟测试
-move_stop / stop    停车
-help / quit         查看命令 / 退出'''
+HELP = '''00  启动时查询队伍（实车串口自动发送）
+01  move_straight 30    前后误差，正值向前，负值向后
+02  move_turn 10        转向误差，正值向右，负值向左
+03  grab 0              夹爪，0 开，1 关
+04  camera 20           相机俯角，0～80 度
+05  move_turn_a 30      相对转角（度），正值向右，负值向左
+06  angle_calib 90      设置当前绝对角度，暂用于模拟测试
+07  move_straight_dis 20  按厘米直行，正值向前，负值向后
+08  move_stop / stop    停车
+    help / quit         查看命令 / 退出'''
 
 
 class SerialTest(Node):
@@ -37,6 +39,7 @@ class SerialTest(Node):
         self.actions = {
             'move_straight': (self.cmd.move_staight, -32768, 32767),
             'move_staight': (self.cmd.move_staight, -32768, 32767),
+            'move_straight_dis': (self.cmd.move_straight_dis, -32768, 32767),
             'move_turn': (self.cmd.move_turn, -32768, 32767),
             'move_turn_a': (self.cmd.move_turn_a, -32768, 32767),
             'grab': (self.cmd.grab, 0, 1),
@@ -72,8 +75,7 @@ class SerialTest(Node):
     def frame_callback(self, frame):
         """把串口桥实际记录的帧交给客户端串口页。"""
         direction = 'TX' if frame.tx else 'RX'
-        mode = ' [SIM]' if frame.simulated else ''
-        self.write_frame(direction + mode, frame.data)
+        self.write_frame(direction, frame.data)
 
     def raw_rx_callback(self, message):
         self.write_frame('RX [RAW]', message.data)
@@ -100,7 +102,7 @@ class SerialTest(Node):
         action(value)
         self.publisher.wait_for_all_acked(Duration(seconds=0.5))
         if name in ('angle_calib', 'set_angle'):
-            print(f'[SerialTest] 已发布绝对角度 {value}，06 仅在模拟串口打包')
+            print(f'[SerialTest] 已发布绝对角度 {value}，06 仅用于伪串口调试')
         else:
             print(f'[SerialTest] 已发布 {name} {value}')
 

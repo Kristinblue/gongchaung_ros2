@@ -23,6 +23,14 @@ perception_node:
       horizon_margin_px: 16.0
     supplies_on_left: true
 
+safety_detector_node:
+  ros__parameters:
+    hsv:
+      # 顺序为 Hmin、Smin、Vmin、Hmax、Smax、Vmax。H 可以跨越零点。
+      purple: [125, 100, 25, 155, 255, 255]
+      red: [155, 70, 35, 2, 255, 255]
+      blue: [98, 22, 35, 145, 150, 255]
+
 desktop_server_node:
   ros__parameters:
     preview_width: 640

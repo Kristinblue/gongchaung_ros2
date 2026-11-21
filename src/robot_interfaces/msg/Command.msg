@@ -10,4 +10,5 @@ uint8 GRAB=3
 uint8 CAMERA=4
 uint8 TURN_ANGLE=5
 uint8 ANGLE_CALIB=6
-uint8 STOP=7
+uint8 STRAIGHT_DIS=7
+uint8 STOP=8

@@ -21,7 +21,7 @@ source install/local_setup.bash
 ros2 topic echo /approach_test/command
 ```
 
-`code: 2` 是转向误差，`code: 1` 是前后误差，`code: 7` 表示停车。命令位常量定义在 [Command.msg](../robot_interfaces/msg/Command.msg)，节点里用 `Command.TURN`、`Command.STRAIGHT`、`Command.STOP`，不写字面量。候选框可查看 `/approach_test/target`。已有视觉节点在跑时，也可单独运行 `ros2 run tests_pkg approach_test_node --ros-args --params-file src/robot_launch/config/robot.yaml`。
+`code: 2` 是转向误差，`code: 1` 是前后误差，`code: 7` 是按厘米直行，`code: 8` 表示停车。命令位常量定义在 [Command.msg](../robot_interfaces/msg/Command.msg)，节点里用 `Command.TURN`、`Command.STRAIGHT`、`Command.STOP`，不写字面量。候选框可查看 `/approach_test/target`。已有视觉节点在跑时，也可单独运行 `ros2 run tests_pkg approach_test_node --ros-args --params-file src/robot_launch/config/robot.yaml`。
 
 需要实车动起来时，先关闭其他动作节点，再给上述启动命令加 `uart:=/dev/ttyS6`。这个模式只启动靠近测试，不启动完整任务。用 `ros2 service call /approach_test/start std_srvs/srv/Trigger '{}'` 开始，`/approach_test/stop` 停止。测试沿用原来逐帧靠近的做法，加了误差限幅、丢目标及断流停车。
 
@@ -60,6 +60,7 @@ bash tools/run.sh serial
 ```text
 cmd> move_straight 0
 cmd> move_straight -30
+cmd> move_straight_dis 20
 cmd> move_turn 10
 cmd> move_turn_a 30
 cmd> grab 0
@@ -74,4 +75,4 @@ cmd> quit
 
 `angle_calib 90`（也可写 `set_angle 90`）调用 `MyCMD.angle_calib()`。`06` 的含义与参数定义待定，当前只在模拟串口打包。
 
-默认用模拟串口。接好 STM32 并腾出 UART 后，用 `bash tools/run.sh serial /dev/ttyS6` 启动实车测试。
+默认由 `stm32_sim.py` 提供伪串口，`serial_node` 按普通串口读写。接好 STM32 并腾出 UART 后，用 `bash tools/run.sh serial /dev/ttyS6` 启动实车测试。

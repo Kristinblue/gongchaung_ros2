@@ -15,14 +15,14 @@ ROS 版的 MyCMD 发话题，由 SerialNode 调用 MyUART。
 #   改协议也不用碰任务代码。
 #
 #   动作命令（发）：01 前进/后退  02 转向  03 夹爪  04 相机俯角
-#                  05 相对旋转  06 绝对角度校准  07 停车  00 查询队伍
+#                  05 相对旋转  06 绝对角度校准  07 距离直行  08 停车  00 查询队伍
 #   回包（收）：  00 队伍确认  01 绝对角度
 
 # 相机端发送的命令位对应
 # 动作与命令位的对应
 GET_FLAG = b'\x00' #确认红蓝方，0为红方，1为蓝方
-STRAIGHT = b'\x01' # 正数后退，负数往前
-TURN = b'\x02' # 正右负做
+STRAIGHT = b'\x01' # 正数前进，负数后退。香橙派算完误差之后取负数再发过去。正数往前更符合直觉
+TURN = b'\x02' # 正右负左
 
 #爪子有限位，需映射角度，暂且先弄最大和最小吧
 # 之后应该还要在单片机里面加对角度的判断，有些角度抓取物块不能完全闭合，应该是检测堵转或者实际角度？
@@ -34,7 +34,10 @@ CAM_ANGLE = b'\x04'
 #角度旋转
 TURN_ANGLE = b'\x05' # 以当前方向为基准，正数为右转角度，顺时针，负数左转
 ANGLE_CALIB = b'\x06' # 绝对角度校准，利用安全区的，之后具体规定
-STOP = b'\x07'
+STRAIGHT_DIS = b'\x07' # 直线行驶，单位cm，正数前进，负数后退。
+#可能是需要具体距离的，因为我想通过这个快速调整接近安全区的姿态
+STOP = b'\x08'
+
 
 # 接收的命令对应
 FLAG = b'\x00' #确认红蓝方，0为红方，1为蓝方
@@ -63,12 +66,16 @@ class MyCMD:
         self.publisher.publish(Command(code=cmd[0], value=max(-32768,min(32767,int(value)))))
 
     def move_staight(self, speed:int):
-        """前进/后退，正数后退，负数往前
+        """前进/后退，正数前进，负数后退
         由像素决定，以及PID的参数
         不是严格的speed！！！！！
         """
         # speed 是像素误差，不是 m/s；实际速度由 STM32 的 PID 决定。
         self._send(STRAIGHT, speed)
+
+    def move_straight_dis(self, distance:int):
+        """按厘米直行，正数前进，负数后退，由 STM32 执行。"""
+        self._send(STRAIGHT_DIS, distance)
 
     def move_turn(self, speed:int):
         """转向，正右负左"""
@@ -103,7 +110,7 @@ class MyCMD:
         self._send(ANGLE_CALIB, angle)
 
     def move_stop(self):
-        """07停车，并清除旧的前进和转向误差，不改变夹爪。"""
+        """08停车，并清除旧的前进和转向误差，不改变夹爪。"""
         # 停车同时清掉 turn_done，避免旧的“转完了”状态影响下一次动作。
         self.turn_done = False
         self._turn_angle = 0
